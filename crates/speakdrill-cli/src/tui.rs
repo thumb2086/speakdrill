@@ -84,25 +84,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
     };
 
     // 背景載入目錄
-    {
-        let tx = tx.clone();
-        rt.spawn(async move {
-            let cfg = speakdrill_core::Config::load_or_default();
-            match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
-                Ok(cdp) => match fetch_catalog(&cdp, &cfg.server, &cfg.code, &cfg.content_type).await {
-                    Ok(list) => {
-                        let _ = tx.send(Ev::Catalog(list));
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Ev::Fatal(format!("抓目錄失敗：{e}")));
-                    }
-                },
-                Err(e) => {
-                    let _ = tx.send(Ev::Fatal(format!("連不上 speakdrill：{e}")));
-                }
-            }
-        });
-    }
+    spawn_catalog(&rt, tx.clone(), false);
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -150,6 +132,10 @@ fn event_loop(
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         app.sel = app.sel.saturating_sub(1);
+                    }
+                    KeyCode::Char('r') if !app.running => {
+                        app.logs.push("… 重新載入目錄".into());
+                        spawn_catalog(rt, tx.clone(), true);
                     }
                     KeyCode::Char('s') => {
                         stop.store(true, Ordering::Relaxed);
@@ -270,6 +256,29 @@ fn apply(app: &mut App, ev: Ev) {
             app.logs.push(format!("✗ {e}"));
         }
     }
+}
+
+fn spawn_catalog(rt: &tokio::runtime::Runtime, tx: UnboundedSender<Ev>, refresh: bool) {
+    rt.spawn(async move {
+        let cfg = speakdrill_core::Config::load_or_default();
+        match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
+            Ok(cdp) => match speakdrill_core::lesson::fetch_catalog_opts(
+                &cdp, &cfg.server, &cfg.code, &cfg.content_type, refresh,
+            )
+            .await
+            {
+                Ok(list) => {
+                    let _ = tx.send(Ev::Catalog(list));
+                }
+                Err(e) => {
+                    let _ = tx.send(Ev::Fatal(format!("抓目錄失敗：{e}")));
+                }
+            },
+            Err(e) => {
+                let _ = tx.send(Ev::Fatal(format!("連不上 MyET：{e}")));
+            }
+        }
+    });
 }
 
 fn draw(f: &mut ratatui::Frame, app: &App) {

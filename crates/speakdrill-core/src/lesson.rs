@@ -10,19 +10,31 @@ use crate::cdp::Cdp;
 pub struct LessonRef {
     pub lesson_id: String,
     pub course_id: String,
-    /// 課程名稱（目錄頁的 `L2` 標題），抓不到就等於 lesson_id
+    /// 課程名稱，抓不到就等於 lesson_id
     #[serde(default)]
     pub title: String,
+    /// 已有成績（代表練過）→ 最佳分數
+    #[serde(default)]
+    pub best_score: Option<f64>,
 }
 
 impl LessonRef {
-    /// 給 UI 顯示用：名稱優先，沒有就退回代碼
+    pub fn done(&self) -> bool {
+        self.best_score.is_some()
+    }
+
+    /// 給 UI 顯示用：名稱優先，沒有就退回代碼；已練過加 ✓ 與分數
     pub fn label(&self) -> String {
-        if self.title.is_empty() || self.title == self.lesson_id {
+        let mut s = if self.title.is_empty() || self.title == self.lesson_id {
             self.lesson_id.clone()
         } else {
             format!("{}  ({})", self.title, self.lesson_id)
+        };
+        match self.best_score {
+            Some(sc) => s.push_str(&format!("  ✓ {sc:.1}")),
+            None => s.push_str("  · 未練"),
         }
+        s
     }
 }
 
@@ -32,50 +44,167 @@ pub struct Line {
     pub text: String,
 }
 
-/// 從目錄頁抓出所有課程（`GoToLesson('<LessonID>','<CourseID>',…)` + 名稱）。
+/// 取課程清單（含名稱與是否已練過）。
+///
+/// 效能重點：
+///   - **不導覽頁面**，直接在現有頁面內 `fetch()`，避免整頁重新載入
+///   - **在 JS 裡用 DOMParser 解析**，只回傳必要欄位（~3 KB，而不是 200 KB HTML）
+///   - 有磁碟快取（預設 10 分鐘），重開 TUI/GUI 幾乎瞬間
+///
+/// 主要來源 `CategoryLessonScores.aspx`（一頁同時有課名、LessonID、CourseID、最佳分數），
+/// 抓不到才退回 `CatalogPage.aspx`（只有名稱）。
 pub async fn fetch_catalog(cdp: &Cdp, server: &str, code: &str, content_type: &str) -> Result<Vec<LessonRef>> {
-    let url = format!(
-        "{server}/AudreyWeb/CatalogPage.aspx?CodeName={code}&ContentType={content_type}"
-    );
-    cdp.navigate(&url).await?;
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-    let html = cdp.html().await?;
+    fetch_catalog_opts(cdp, server, code, content_type, false).await
+}
 
-    // 每個課程是一個 <a href="javascript:GoToLesson('LID','CID',...)">…<div class="L2">名稱</div>…</a>
-    let anchor_re = Regex::new(r#"(?s)GoToLesson\('([^']+)','([^']+)'[^>]*>(.*?)</a>"#).unwrap();
-    let title_re = Regex::new(r#"(?s)<div class="L2">(.*?)</div>"#).unwrap();
-    let tag_re = Regex::new(r"<[^>]+>").unwrap();
+pub async fn fetch_catalog_opts(
+    cdp: &Cdp,
+    server: &str,
+    code: &str,
+    content_type: &str,
+    refresh: bool,
+) -> Result<Vec<LessonRef>> {
+    let cache = crate::config::cache_dir().join(format!("catalog_{code}_{content_type}.json"));
 
-    let mut out: Vec<LessonRef> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for c in anchor_re.captures_iter(&html) {
-        let lesson_id = c[1].to_string();
-        let course_id = c[2].to_string();
-        if !seen.insert(lesson_id.clone()) {
-            continue;
-        }
-        let title = title_re
-            .captures(&c[3])
-            .map(|t| unescape(tag_re.replace_all(&t[1], "").trim()))
-            .unwrap_or_default();
-        out.push(LessonRef { lesson_id, course_id, title });
-    }
-
-    // 有些版面的 anchor 結構不同，退回只抓 ID（名稱留空）
-    if out.is_empty() {
-        let re = Regex::new(r"GoToLesson\('([^']+)','([^']+)'").unwrap();
-        for c in re.captures_iter(&html) {
-            let lesson_id = c[1].to_string();
-            if seen.insert(lesson_id.clone()) {
-                out.push(LessonRef { lesson_id, course_id: c[2].to_string(), title: String::new() });
+    if !refresh {
+        if let Ok(s) = std::fs::read_to_string(&cache) {
+            if let Ok(c) = serde_json::from_str::<CatalogCache>(&s) {
+                let age = c.fetched_at.elapsed_secs();
+                if age < 600 && !c.lessons.is_empty() {
+                    return Ok(c.lessons);
+                }
             }
         }
     }
 
-    if out.is_empty() {
-        return Err(anyhow!("目錄頁抓不到課程，可能沒登入或 CodeName 不對"));
+    let lessons = fetch_catalog_live(cdp, server, code, content_type).await?;
+
+    if let Ok(s) = serde_json::to_string(&CatalogCache {
+        fetched_at: CacheStamp::now(),
+        lessons: lessons.clone(),
+    }) {
+        let _ = std::fs::create_dir_all(cache.parent().unwrap_or(std::path::Path::new(".")));
+        let _ = std::fs::write(&cache, s);
     }
-    Ok(out)
+
+    Ok(lessons)
+}
+
+#[derive(Serialize, Deserialize)]
+struct CatalogCache {
+    fetched_at: CacheStamp,
+    lessons: Vec<LessonRef>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CacheStamp {
+    unix: u64,
+}
+
+impl CacheStamp {
+    fn now() -> Self {
+        Self {
+            unix: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        }
+    }
+    fn elapsed_secs(&self) -> u64 {
+        Self::now().unix.saturating_sub(self.unix)
+    }
+}
+
+/// 單次 JS 呼叫完成「抓頁面 + 解析 + 回傳精簡 JSON」
+async fn fetch_catalog_live(cdp: &Cdp, _server: &str, code: &str, content_type: &str) -> Result<Vec<LessonRef>> {
+    let js = format!(
+        r#"(async () => {{
+  const parse = (html, withScore) => {{
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const out = [];
+    if (withScore) {{
+      for (const tr of doc.querySelectorAll('.data-tr')) {{
+        const a = tr.querySelector('[data-lessonid]');
+        if (!a) continue;
+        const t = (tr.querySelector('.lesson-title-td')?.textContent || '').replace(/\s+/g, ' ').trim();
+        const sEl = tr.querySelector('.score');
+        const s = sEl ? parseFloat(sEl.textContent) : NaN;
+        out.push({{ id: a.getAttribute('data-lessonid'), cid: a.getAttribute('data-courseid'), title: t, score: Number.isFinite(s) ? s : null }});
+      }}
+    }}
+    if (!out.length) {{
+      const seen = new Set();
+      for (const a of doc.querySelectorAll('a[href*="GoToLesson"]')) {{
+        const m = /GoToLesson\('([^']+)','([^']+)'/.exec(a.getAttribute('href') || '');
+        if (!m || seen.has(m[1])) continue;
+        seen.add(m[1]);
+        const t = (a.querySelector('.L2')?.textContent || '').replace(/\s+/g, ' ').trim();
+        out.push({{ id: m[1], cid: m[2], title: t, score: null }});
+      }}
+    }}
+    return out;
+  }};
+  const get = async (u) => {{ try {{ const r = await fetch(u, {{credentials:'include'}}); return r.ok ? await r.text() : ''; }} catch(e) {{ return ''; }} }};
+  let rows = parse(await get('CategoryLessonScores.aspx?CodeName={code}&ContentType={content_type}'), true);
+  if (!rows.length) rows = parse(await get('CatalogPage.aspx?CodeName={code}&ContentType={content_type}'), false);
+  return JSON.stringify(rows);
+}})()"#
+    );
+
+    let json = cdp.eval_string(&js).await?;
+    let rows: Vec<RawRow> = serde_json::from_str(&json).unwrap_or_default();
+    if rows.is_empty() {
+        return Err(anyhow!("抓不到課程，可能沒登入或 CodeName 不對（試試 --refresh 或先登入）"));
+    }
+    Ok(rows
+        .into_iter()
+        .map(|r| LessonRef {
+            lesson_id: r.id,
+            course_id: r.cid,
+            title: unescape(&r.title),
+            best_score: r.score,
+        })
+        .collect())
+}
+
+#[derive(serde::Deserialize)]
+struct RawRow {
+    id: String,
+    cid: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    score: Option<f64>,
+}
+
+/// 解析 `CategoryLessonScores.aspx` 的 `<div class="data-tr">` 列
+fn parse_score_rows(html: &str) -> Vec<LessonRef> {
+    let title_re = Regex::new(r#"(?s)<div class="lesson-title-td">(.*?)</div>"#).unwrap();
+    let score_re = Regex::new(r#"<div class="score">([0-9]+(?:\.[0-9]+)?)</div>"#).unwrap();
+    let id_re = Regex::new(r#"data-lessonid="([^"]+)""#).unwrap();
+    let course_re = Regex::new(r#"data-courseid="([^"]+)""#).unwrap();
+    let tag_re = Regex::new(r"<[^>]+>").unwrap();
+
+    let mut out = Vec::new();
+    // Rust 的 regex 沒有 lookahead，用 split 切每一列
+    for body in html.split(r#"<div class="data-tr">"#).skip(1) {
+        let Some(id) = id_re.captures(body) else { continue };
+        let Some(course) = course_re.captures(body) else { continue };
+        let title = title_re
+            .captures(body)
+            .map(|t| unescape(tag_re.replace_all(&t[1], " ").trim()))
+            .unwrap_or_default();
+        let best_score = score_re
+            .captures(body)
+            .and_then(|s| s[1].parse::<f64>().ok());
+        out.push(LessonRef {
+            lesson_id: id[1].to_string(),
+            course_id: course[1].to_string(),
+            title,
+            best_score,
+        });
+    }
+    out
 }
 
 fn unescape(s: &str) -> String {

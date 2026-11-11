@@ -395,10 +395,19 @@ pub fn save_report(r: &LessonReport) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// 確保登入（導到 Home，失敗就提示）
+/// 確保登入：先看目前頁面有沒有登入資訊，沒有才導覽到 Home。
 pub async fn ensure_logged_in(cdp: &Cdp, server: &str) -> Result<()> {
+    if let Ok(acc) = cdp
+        .eval_string("(typeof My !== 'undefined' && My.AccID) ? String(My.AccID) : ''")
+        .await
+    {
+        if !acc.is_empty() && acc != "0" {
+            return Ok(());
+        }
+    }
+
     cdp.navigate(&format!("{server}/AudreyWeb/Home.aspx")).await?;
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
     let acc = cdp
         .eval_string("(typeof My !== 'undefined' && My.AccID) ? String(My.AccID) : '0'")
         .await

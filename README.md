@@ -104,9 +104,11 @@ Windows 只允許「用介面」設定 per-app 音訊裝置（登錄值裡有一
 speakdrill                      # 終端機介面（預設；課程列表 + 即時分數）
 speakdrill-gui                  # 原生 GUI
 
-speakdrill list                 # 列出目錄課程（名稱 + 代碼）
+speakdrill list                 # 列出目錄課程（名稱 + 代碼 + 已練分數）
+speakdrill list --refresh       # 忽略快取重抓（目錄快取 10 分鐘）
 
 speakdrill run  --lesson BKM-GAR-1A027 --course BKM-B1A-001
+speakdrill batch --code BKM_1A --skip-completed   # 跳過已練過的課
 speakdrill batch --code BKM_1A --limit 5
 speakdrill batch --code BKM_1A --start 10 --limit 3
 
