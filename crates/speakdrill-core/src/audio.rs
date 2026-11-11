@@ -1,11 +1,13 @@
 //! 音訊播放：用 cpal 指定裝置、零延遲餵樣本。
 //!
-//! 為什麼要自己寫：speakdrill 的錄音視窗只有 ~2.7 秒，
+//! 為什麼要自己寫：MyET 的錄音視窗只有 ~2.7 秒，
 //! 每次啟動外部播放器（Python/ffplay）都會吃掉 0.5~1 秒。
-//! 這裡把 stream 開好常駐，播歌只是把樣本塞進環形緩衝。
+//! 這裡把 stream 開好常駐，播放只是把樣本塞進環形緩衝。
 //!
-//! 注意：cpal 的 `Stream` 是 `!Send`，所以裝置列舉與 stream 建立
-//! 必須全部在音訊執行緒裡完成。
+//! 三個實作要點（都踩過）：
+//!   1. cpal 的 `Stream` 是 `!Send` → 裝置列舉與建立都要在音訊執行緒內完成
+//!   2. 虛擬裝置（VB-CABLE）常拒絕硬塞的格式 → 先問 `supported_output_configs()`
+//!   3. 舊式虛擬驅動只吃 16-bit 整數 → 需要 f32 / i16 / u16 三種寫法
 
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -28,15 +30,193 @@ pub struct AudioPlayer {
     _handle: JoinHandle<()>,
 }
 
+type Buf = Arc<Mutex<VecDeque<f32>>>;
+type Flag = Arc<Mutex<bool>>;
+
+/// 找輸出裝置：名稱不分大小寫比對；同名的取「聲道數最少」那顆
+/// （VB-CABLE 會同時掛 16ch 與 2ch 兩個端點，16ch 那顆常常開不起來）
+fn find_output_device(host: &cpal::Host, needle: &str) -> Option<cpal::Device> {
+    let needle = needle.to_lowercase();
+    let mut best: Option<(u16, cpal::Device)> = None;
+    for d in host.output_devices().ok()? {
+        let name = d.name().unwrap_or_default().to_lowercase();
+        if !name.contains(&needle) {
+            continue;
+        }
+        let ch = d
+            .default_output_config()
+            .map(|c| c.channels())
+            .unwrap_or(u16::MAX);
+        match &best {
+            Some((bch, _)) if *bch <= ch => {}
+            _ => best = Some((ch, d)),
+        }
+    }
+    best.map(|(_, d)| d)
+}
+
+fn stream_cfg(rate: u32, channels: u16) -> cpal::StreamConfig {
+    cpal::StreamConfig {
+        channels,
+        sample_rate: cpal::SampleRate(rate),
+        buffer_size: cpal::BufferSize::Default,
+    }
+}
+
+fn build_f32(dev: &cpal::Device, rate: u32, ch: u16, buf: Buf, playing: Flag) -> Result<cpal::Stream> {
+    let n = ch as usize;
+    let s = dev
+        .build_output_stream(
+            &stream_cfg(rate, ch),
+            move |data: &mut [f32], _| {
+                let mut b = buf.lock().unwrap();
+                let mut any = false;
+                for frame in data.chunks_mut(n) {
+                    let v = b.pop_front().unwrap_or(0.0);
+                    if v != 0.0 {
+                        any = true;
+                    }
+                    for o in frame.iter_mut() {
+                        *o = v;
+                    }
+                }
+                let mut p = playing.lock().unwrap();
+                if any {
+                    *p = true;
+                } else if b.is_empty() {
+                    *p = false;
+                }
+            },
+            |e| eprintln!("[audio] {e}"),
+            None,
+        )
+        .map_err(|e| anyhow!("{e}"))?;
+    s.play().map_err(|e| anyhow!("{e}"))?;
+    Ok(s)
+}
+
+fn build_i16(dev: &cpal::Device, rate: u32, ch: u16, buf: Buf, playing: Flag) -> Result<cpal::Stream> {
+    let n = ch as usize;
+    let s = dev
+        .build_output_stream(
+            &stream_cfg(rate, ch),
+            move |data: &mut [i16], _| {
+                let mut b = buf.lock().unwrap();
+                let mut any = false;
+                for frame in data.chunks_mut(n) {
+                    let v = b.pop_front().unwrap_or(0.0);
+                    if v != 0.0 {
+                        any = true;
+                    }
+                    let x = (v.clamp(-1.0, 1.0) * 32767.0) as i16;
+                    for o in frame.iter_mut() {
+                        *o = x;
+                    }
+                }
+                let mut p = playing.lock().unwrap();
+                if any {
+                    *p = true;
+                } else if b.is_empty() {
+                    *p = false;
+                }
+            },
+            |e| eprintln!("[audio] {e}"),
+            None,
+        )
+        .map_err(|e| anyhow!("{e}"))?;
+    s.play().map_err(|e| anyhow!("{e}"))?;
+    Ok(s)
+}
+
+fn build_u16(dev: &cpal::Device, rate: u32, ch: u16, buf: Buf, playing: Flag) -> Result<cpal::Stream> {
+    let n = ch as usize;
+    let s = dev
+        .build_output_stream(
+            &stream_cfg(rate, ch),
+            move |data: &mut [u16], _| {
+                let mut b = buf.lock().unwrap();
+                let mut any = false;
+                for frame in data.chunks_mut(n) {
+                    let v = b.pop_front().unwrap_or(0.0);
+                    if v != 0.0 {
+                        any = true;
+                    }
+                    let x = (((v.clamp(-1.0, 1.0) * 0.5) + 0.5) * 65535.0) as u16;
+                    for o in frame.iter_mut() {
+                        *o = x;
+                    }
+                }
+                let mut p = playing.lock().unwrap();
+                if any {
+                    *p = true;
+                } else if b.is_empty() {
+                    *p = false;
+                }
+            },
+            |e| eprintln!("[audio] {e}"),
+            None,
+        )
+        .map_err(|e| anyhow!("{e}"))?;
+    s.play().map_err(|e| anyhow!("{e}"))?;
+    Ok(s)
+}
+
+fn try_build(
+    dev: &cpal::Device,
+    fmt: cpal::SampleFormat,
+    rate: u32,
+    ch: u16,
+    buf: &Buf,
+    playing: &Flag,
+) -> Result<cpal::Stream> {
+    match fmt {
+        cpal::SampleFormat::F32 => build_f32(dev, rate, ch, buf.clone(), playing.clone()),
+        cpal::SampleFormat::I16 => build_i16(dev, rate, ch, buf.clone(), playing.clone()),
+        cpal::SampleFormat::U16 => build_u16(dev, rate, ch, buf.clone(), playing.clone()),
+        other => Err(anyhow!("不支援的樣本格式 {other:?}")),
+    }
+}
+
+/// 依裝置真正支援的格式開 stream。回傳 (stream, 實際取樣率, 錯誤訊息)
+fn open_stream(dev: &cpal::Device, buf: &Buf, playing: &Flag) -> (Option<(cpal::Stream, u32)>, String) {
+    let mut last = String::new();
+
+    if let Ok(ranges) = dev.supported_output_configs() {
+        for r in ranges {
+            let lo = r.min_sample_rate().0;
+            let hi = r.max_sample_rate().0;
+            let rate = 48000.clamp(lo, hi);
+            let ch = r.channels();
+            let fmt = r.sample_format();
+            match try_build(dev, fmt, rate, ch, buf, playing) {
+                Ok(s) => return (Some((s, rate)), last),
+                Err(e) => last = format!("{fmt:?} {rate}Hz/{ch}ch: {e}"),
+            }
+        }
+    }
+
+    // 後備：硬塞常見組合
+    for fmt in [cpal::SampleFormat::F32, cpal::SampleFormat::I16] {
+        for (rate, ch) in [(48000u32, 2u16), (44100, 2), (48000, 1), (44100, 1)] {
+            match try_build(dev, fmt, rate, ch, buf, playing) {
+                Ok(s) => return (Some((s, rate)), last),
+                Err(e) => last = format!("{fmt:?} {rate}Hz/{ch}ch: {e}"),
+            }
+        }
+    }
+
+    (None, last)
+}
+
 impl AudioPlayer {
-    /// 依名稱片段找輸出裝置。`needle` 例如 "Voicemeeter Input"。
+    /// 依名稱片段找輸出裝置。`needle` 例如 "Voicemeeter Input" 或 "CABLE Input"。
     pub fn new(needle: &str) -> Result<Self> {
         let (info_tx, info_rx) = mpsc::channel::<Result<(String, u32)>>();
         let (tx, rx) = mpsc::channel::<Cmd>();
-        let playing = Arc::new(Mutex::new(false));
+        let playing: Flag = Arc::new(Mutex::new(false));
 
         let needle = needle.to_string();
-        let buf: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let buf: Buf = Arc::new(Mutex::new(VecDeque::new()));
         let buf2 = buf.clone();
         let playing2 = playing.clone();
         let playing3 = playing.clone();
@@ -45,71 +225,23 @@ impl AudioPlayer {
             .name("speakdrill-audio".into())
             .spawn(move || {
                 let host = cpal::default_host();
-                let device = host
-                    .output_devices()
-                    .ok()
-                    .and_then(|mut it| {
-                        it.find(|d| {
-                            d.name()
-                                .map(|n| n.to_lowercase().contains(&needle.to_lowercase()))
-                                .unwrap_or(false)
-                        })
-                    });
-
-                let Some(device) = device else {
+                let Some(device) = find_output_device(&host, &needle) else {
                     let _ = info_tx.send(Err(anyhow!(
-                        "找不到輸出裝置「{needle}」。請開 VoiceMeeter，或用 --device 指定。"
+                        "找不到輸出裝置「{needle}」。請確認虛擬音效裝置已安裝並啟用。"
+                    )));
+                    return;
+                };
+                let name = device.name().unwrap_or_default();
+
+                let (opened, last_err) = open_stream(&device, &buf2, &playing3);
+                let Some((stream, rate)) = opened else {
+                    let _ = info_tx.send(Err(anyhow!(
+                        "裝置「{name}」開不起來（{last_err}）。\n\
+                         若剛安裝 VB-CABLE，請重開機後再試。"
                     )));
                     return;
                 };
 
-                let name = device.name().unwrap_or_default();
-                let cfg = match device.default_output_config() {
-                    Ok(c) => c,
-                    Err(e) => {
-                        let _ = info_tx.send(Err(anyhow!("取裝置預設格式失敗：{e}")));
-                        return;
-                    }
-                };
-                let rate = cfg.sample_rate().0;
-                let channels = cfg.channels() as usize;
-                let stream_cfg: cpal::StreamConfig = cfg.config();
-
-                let stream = match device.build_output_stream(
-                    &stream_cfg,
-                    move |data: &mut [f32], _| {
-                        let mut b = buf2.lock().unwrap();
-                        let mut any = false;
-                        for frame in data.chunks_mut(channels) {
-                            let s = b.pop_front().unwrap_or(0.0);
-                            if s != 0.0 {
-                                any = true;
-                            }
-                            for out in frame.iter_mut() {
-                                *out = s;
-                            }
-                        }
-                        let mut p = playing3.lock().unwrap();
-                        if any {
-                            *p = true;
-                        } else if b.is_empty() {
-                            *p = false;
-                        }
-                    },
-                    move |err| eprintln!("[audio] {err}"),
-                    None,
-                ) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        let _ = info_tx.send(Err(anyhow!("建立輸出串流失敗：{e}")));
-                        return;
-                    }
-                };
-
-                if let Err(e) = stream.play() {
-                    let _ = info_tx.send(Err(anyhow!("啟動串流失敗：{e}")));
-                    return;
-                }
                 let _ = info_tx.send(Ok((name, rate)));
 
                 // stream 必須活在這個 thread 裡
@@ -192,7 +324,7 @@ pub fn load_wav(path: &std::path::Path) -> Result<(Vec<f32>, u32)> {
     Ok((mono, sr))
 }
 
-/// 線性插值重取樣（夠用，且比拉整個 rubato 輕）
+/// 線性插值重取樣
 pub fn resample(x: &[f32], src: u32, dst: u32) -> Vec<f32> {
     if src == dst || x.is_empty() {
         return x.to_vec();

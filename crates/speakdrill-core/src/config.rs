@@ -24,7 +24,14 @@ pub struct Config {
     pub vm_bus: Option<usize>,
     /// 是否在開跑前自動呼叫 VM 路由設定
     pub auto_vm_setup: bool,
+    /// 目標 App 的執行檔名稱（用於比對 per-app 麥克風綁定）
+    #[serde(default = "default_app_exe")]
+    pub app_exe: String,
     pub tts: TtsConfig,
+}
+
+fn default_app_exe() -> String {
+    "MyET10".to_string()
 }
 
 impl Default for Config {
@@ -41,6 +48,7 @@ impl Default for Config {
             vm_strip: None,
             vm_bus: None,
             auto_vm_setup: true,
+            app_exe: default_app_exe(),
             tts: TtsConfig {
                 engine: TtsEngine::Command {
                     template: "python tts_kokoro.py {textfile} {out}".into(),

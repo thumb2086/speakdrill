@@ -96,3 +96,20 @@ pub fn set_volume(needle: &str, capture: bool, scalar: f32) -> Result<usize> {
     }
     Ok(hit)
 }
+
+/// 依名稱片段找裝置的 MMDevice ID（例如 `{0.0.1.00000000}.{guid}`）
+pub fn find_endpoint_id(needle: &str, capture: bool) -> Option<String> {
+    let needle_l = needle.to_lowercase();
+    for (dev, name) in enumerate(capture).ok()? {
+        if name.to_lowercase().contains(&needle_l) {
+            unsafe {
+                if let Ok(id) = dev.GetId() {
+                    if let Ok(s) = id.to_string() {
+                        return Some(s);
+                    }
+                }
+            }
+        }
+    }
+    None
+}

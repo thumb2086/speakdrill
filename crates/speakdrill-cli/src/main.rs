@@ -155,6 +155,10 @@ async fn cmd_init(
         }
     }
 
+    if speakdrill_core::devices::has_vb_cable() && !cfg.play_device.to_lowercase().contains("cable") {
+        println!("  提示：VB-CABLE 已安裝但開不起來，重開機後再跑一次 init 就會切過去");
+    }
+
     match chosen {
         Some(r) => {
             cfg.play_device = r.play_device.clone();
@@ -299,6 +303,46 @@ async fn cmd_doctor() -> Result<()> {
                     );
                 }
             }
+        }
+    }
+
+    print!("[App 麥克風] … ");
+    {
+        use speakdrill_core::devices;
+        let route = devices::routes()
+            .into_iter()
+            .find(|r| r.play_device == cfg.play_device);
+        match route {
+            Some(r) => {
+                let expected = speakdrill_core::winvol::find_endpoint_id(&r.mic_device, true);
+                match speakdrill_core::binding::app_mic_binding(&cfg.app_exe) {
+                    Some(b) if b.mic_guid.as_deref() == expected.as_deref() => {
+                        println!("OK（{} 已綁定 {}）", cfg.app_exe, r.mic_device)
+                    }
+                    Some(b) => {
+                        println!(
+                            "✗ {} 綁定的是 {}，但我們播到 {}",
+                            cfg.app_exe,
+                            b.mic_guid.unwrap_or_else(|| "(未知)".into()),
+                            r.mic_device
+                        );
+                        println!(
+                            "      修正：ms-settings:apps-volume → {} → 輸入裝置選「{}」",
+                            cfg.app_exe, r.mic_device
+                        );
+                        bad += 1;
+                    }
+                    None => {
+                        println!("✗ 找不到 {} 的 per-app 設定", cfg.app_exe);
+                        println!(
+                            "      請到 ms-settings:apps-volume 把它的輸入裝置設成「{}」",
+                            r.mic_device
+                        );
+                        bad += 1;
+                    }
+                }
+            }
+            None => println!("（沒有可對應的迴路，略過）"),
         }
     }
 

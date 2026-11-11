@@ -48,6 +48,21 @@ fn capture_names() -> Vec<String> {
     Vec::new()
 }
 
+/// CABLE 的播放端點在 Windows 可能叫「CABLE Input」，
+/// 也可能叫「喇叭 (VB-Audio Virtual Cable)」，兩種都要認。
+fn pick_cable_input(names: &[String]) -> Option<String> {
+    if let Some(n) = names.iter().find(|n| n.to_lowercase().contains("cable input")) {
+        return Some(n.clone());
+    }
+    names
+        .iter()
+        .find(|n| {
+            let l = n.to_lowercase();
+            l.contains("vb-audio virtual cable") && !l.contains("16")
+        })
+        .cloned()
+}
+
 fn pick(names: &[String], needle: &str) -> Option<String> {
     names
         .iter()
@@ -59,7 +74,7 @@ fn pick(names: &[String], needle: &str) -> Option<String> {
 pub fn has_vb_cable() -> bool {
     let outs = render_names();
     let ins = capture_names();
-    pick(&outs, "CABLE Input").is_some() && pick(&ins, "CABLE Output").is_some()
+    pick_cable_input(&outs).is_some() && pick(&ins, "CABLE Output").is_some()
 }
 
 /// 所有可用的迴路，優先序：VB-CABLE → VoiceMeeter
@@ -68,7 +83,7 @@ pub fn routes() -> Vec<VirtualRoute> {
     let ins = capture_names();
     let mut v = Vec::new();
 
-    if let (Some(p), Some(m)) = (pick(&outs, "CABLE Input"), pick(&ins, "CABLE Output")) {
+    if let (Some(p), Some(m)) = (pick_cable_input(&outs), pick(&ins, "CABLE Output")) {
         v.push(VirtualRoute { play_device: p, mic_device: m, needs_vm: false });
     }
     if let (Some(p), Some(m)) = (pick(&outs, "Voicemeeter Input"), pick(&ins, "Voicemeeter Out B1")) {
@@ -82,7 +97,7 @@ pub fn detect_route() -> Option<VirtualRoute> {
     let outs = render_names();
     let ins = capture_names();
 
-    if let (Some(p), Some(m)) = (pick(&outs, "CABLE Input"), pick(&ins, "CABLE Output")) {
+    if let (Some(p), Some(m)) = (pick_cable_input(&outs), pick(&ins, "CABLE Output")) {
         return Some(VirtualRoute {
             play_device: p,
             mic_device: m,

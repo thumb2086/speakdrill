@@ -159,12 +159,14 @@ async fn page_title(cdp: &Cdp) -> String {
 
 pub struct RunOptions {
     pub resume: bool,
+    /// 即使 per-app 麥克風綁定不符也照跑
+    pub force: bool,
     pub timeout: Duration,
 }
 
 impl Default for RunOptions {
     fn default() -> Self {
-        Self { resume: false, timeout: Duration::from_secs(40 * 60) }
+        Self { resume: false, force: false, timeout: Duration::from_secs(40 * 60) }
     }
 }
 
@@ -178,6 +180,7 @@ pub async fn run_lesson(
     opts: &RunOptions,
     p: &mut dyn Progress,
 ) -> Result<LessonReport> {
+    check_app_binding(cfg, opts.force)?;
     let started = Instant::now();
     let query = scoring_query(lesson_id, &cfg.code, &cfg.content_type, cfg.mode, course_id);
     let lines = fetch_lines(cdp, &query).await?;
@@ -393,6 +396,64 @@ pub fn save_report(r: &LessonReport) -> Result<PathBuf> {
     let path = dir.join(format!("{}.json", r.lesson_id));
     std::fs::write(&path, serde_json::to_string_pretty(r)?)?;
     Ok(path)
+}
+
+/// 檢查「App 的 per-app 麥克風」是否就是我們送聲音的那個裝置。
+///
+/// 這是今天踩到的大坑：App 聽 A 裝置、我們播到 B 裝置，
+/// 結果每一句都 4 分，而且完全看不出原因。這裡直接擋下來並講清楚怎麼修。
+pub fn check_app_binding(cfg: &Config, force: bool) -> Result<()> {
+    #[cfg(not(windows))]
+    {
+        let _ = (cfg, force);
+        return Ok(());
+    }
+
+    #[cfg(windows)]
+    {
+        let Some(route) = crate::devices::routes()
+            .into_iter()
+            .find(|r| r.play_device == cfg.play_device)
+        else {
+            return Ok(()); // 沒有迴路資訊就不擋
+        };
+
+        let Some(expected) = crate::winvol::find_endpoint_id(&route.mic_device, true) else {
+            return Ok(());
+        };
+
+        let Some(bind) = crate::binding::app_mic_binding(&cfg.app_exe) else {
+            println!("⚠ 找不到「{}」的 per-app 麥克風設定", cfg.app_exe);
+            println!("  請到 ms-settings:apps-volume 把它設成「{}」", route.mic_device);
+            if force {
+                return Ok(());
+            }
+            return Err(anyhow!(
+                "未設定 per-app 麥克風，繼續跑只會拿到低分（加 --force 可略過）"
+            ));
+        };
+
+        match bind.mic_guid.as_deref() {
+            Some(g) if g.eq_ignore_ascii_case(&expected) => Ok(()),
+            other => {
+                println!("⚠ per-app 麥克風不一致");
+                println!("  App 目前聽：{}", other.unwrap_or("(未知)"));
+                println!("  我們播到  ：{}", expected);
+                println!(
+                    "  修正：ms-settings:apps-volume → {} → 輸入裝置選「{}」",
+                    cfg.app_exe, route.mic_device
+                );
+                if force {
+                    println!("  （--force：仍繼續執行）");
+                    Ok(())
+                } else {
+                    Err(anyhow!(
+                        "per-app 麥克風指向錯的裝置，會全部低分（加 --force 可略過）"
+                    ))
+                }
+            }
+        }
+    }
 }
 
 /// 確保登入：先看目前頁面有沒有登入資訊，沒有才導覽到 Home。
