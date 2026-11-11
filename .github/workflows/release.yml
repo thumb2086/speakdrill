@@ -52,7 +52,6 @@ jobs:
         with:
           node-version: "22.14.0" # Trusted publishing 最低需求
           registry-url: https://registry.npmjs.org
-          package-manager-cache: false # release build 不要用快取
 
       - name: Upgrade npm
         run: npm install -g npm@latest # 需要 >= 11.5.1
