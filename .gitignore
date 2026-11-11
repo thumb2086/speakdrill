@@ -10,3 +10,4 @@ dist
 .DS_Store
 Thumbs.db
 npm/*.tgz
+dist_check

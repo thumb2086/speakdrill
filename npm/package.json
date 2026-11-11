@@ -1,24 +1,44 @@
 {
   "name": "speakdrill",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "口說課程自動化練習：TTS 產生示範語音、逐句驅動課程演練、輸出分數報告（Rust，含 TUI / 原生 GUI）",
-  "keywords": ["speaking", "shadowing", "drill", "tts", "voicemeeter", "english", "cli", "tui", "gui", "windows"],
+  "keywords": [
+    "speaking",
+    "shadowing",
+    "drill",
+    "tts",
+    "voicemeeter",
+    "english",
+    "cli",
+    "tui",
+    "gui",
+    "windows"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/thumb2086/speakdrill.git"
+    "url": "git+https://github.com/thumb2086/speakdrill.git"
   },
   "homepage": "https://github.com/thumb2086/speakdrill#readme",
   "bin": {
     "speakdrill": "bin/speakdrill.js"
   },
-  "files": ["bin/", "scripts/", "README.md", "LICENSE"],
+  "files": [
+    "bin/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "postinstall": "node scripts/install.js"
   },
   "engines": {
     "node": ">=18"
   },
-  "os": ["win32"],
-  "cpu": ["x64"]
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ]
 }
