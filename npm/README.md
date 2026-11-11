@@ -21,7 +21,8 @@ speakdrill doctor
 ```bash
 speakdrill init                  # 偵測裝置、寫設定、設 VoiceMeeter 路由、拉音量
 speakdrill doctor                # 檢查環境
-speakdrill tui                   # 終端機介面
+speakdrill                      # 終端機介面（預設）
+speakdrill list                 # 列出課程
 speakdrill-gui                   # 原生 GUI
 speakdrill run  --lesson <ID> --course <ID>
 speakdrill batch --code <CODE> --limit 5

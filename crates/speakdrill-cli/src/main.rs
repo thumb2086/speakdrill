@@ -13,8 +13,9 @@ mod tui;
 #[derive(Parser)]
 #[command(name = "speakdrill", version, about = "MyET 口說練習自動化：TTS 驅動、VoiceMeeter 迴路、分數報告")]
 struct Cli {
+    /// 不給子命令時直接進 TUI
     #[command(subcommand)]
-    cmd: Cmd,
+    cmd: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
@@ -47,6 +48,10 @@ enum Cmd {
         #[arg(long, default_value_t = 80)] pass: u32,
         #[arg(long)] resume: bool,
     },
+    /// 列出目錄中的課程（含名稱）
+    List {
+        #[arg(long)] code: Option<String>,
+    },
     /// 終端機介面
     Tui,
 }
@@ -65,7 +70,8 @@ fn main() -> Result<()> {
         .enable_all()
         .build()?;
 
-    match cli.cmd {
+    let cmd = cli.cmd.unwrap_or(Cmd::Tui);
+    match cmd {
         Cmd::Init { device, server, code } => rt.block_on(cmd_init(device, server, code)),
         Cmd::Doctor => rt.block_on(cmd_doctor()),
         Cmd::Reset { yes } => rt.block_on(cmd_reset(yes)),
@@ -75,6 +81,7 @@ fn main() -> Result<()> {
         Cmd::Batch { code, content_type, limit, start, pass, resume } => {
             rt.block_on(cmd_batch(code, content_type, limit, start, pass, resume))
         }
+        Cmd::List { code } => rt.block_on(cmd_list(code)),
         Cmd::Tui => tui::run(rt),
     }
 }
@@ -179,7 +186,16 @@ fn dirs_model() -> std::path::PathBuf {
 /// 找內附的 Kokoro 轉接器（原始碼執行或 npm 安裝都可能在不同層）
 fn resolve_kokoro_script() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let mut dir = exe.parent()?.to_path_buf();
+    let exe_dir = exe.parent()?.to_path_buf();
+
+    // npm 版：kokoro_tts.py 與 exe 同層
+    let same_dir = exe_dir.join("kokoro_tts.py");
+    if same_dir.exists() {
+        return Some(same_dir);
+    }
+
+    // 原始碼版：往上找 scripts/kokoro_tts.py
+    let mut dir = exe_dir.clone();
     for _ in 0..4 {
         let p = dir.join("scripts").join("kokoro_tts.py");
         if p.exists() {
@@ -189,6 +205,7 @@ fn resolve_kokoro_script() -> Option<std::path::PathBuf> {
             break;
         }
     }
+
     let cwd = std::env::current_dir().ok()?.join("scripts").join("kokoro_tts.py");
     if cwd.exists() {
         return Some(cwd);
@@ -291,6 +308,23 @@ async fn cmd_reset(yes: bool) -> Result<()> {
     Ok(())
 }
 
+// ---------------- list ----------------
+
+async fn cmd_list(code: Option<String>) -> Result<()> {
+    let mut cfg = Config::load_or_default();
+    if let Some(c) = code {
+        cfg.code = c;
+    }
+    let cdp = Cdp::connect("127.0.0.1", cfg.cdp_port).await?;
+    ensure_logged_in(&cdp, &cfg.server).await?;
+    let all = fetch_catalog(&cdp, &cfg.server, &cfg.code, &cfg.content_type).await?;
+    println!("{} 課（CodeName={}）\n", all.len(), cfg.code);
+    for (i, l) in all.iter().enumerate() {
+        println!("{:3}. {}", i + 1, l.label());
+    }
+    Ok(())
+}
+
 // ---------------- run / batch ----------------
 
 async fn make_session(cfg: &Config) -> Result<(Cdp, AudioPlayer)> {
@@ -331,7 +365,7 @@ async fn cmd_batch(
 
     let mut ok = 0;
     for (i, l) in sel.iter().enumerate() {
-        println!("\n=== [{}/{}] {} ===", begin + i + 1, all.len(), l.lesson_id);
+        println!("\n=== [{}/{}] {} ===", begin + i + 1, all.len(), l.label());
         let mut p = SilentProgress;
         match run_lesson(
             &cdp, &cfg, &player, &l.lesson_id, &l.course_id,

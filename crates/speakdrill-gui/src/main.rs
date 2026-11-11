@@ -54,7 +54,11 @@ impl App {
         let stop = Arc::new(AtomicBool::new(false));
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals = egui::Visuals::dark();
+        style.visuals.panel_fill = egui::Color32::from_rgb(22, 24, 30);
+        style.visuals.window_fill = egui::Color32::from_rgb(22, 24, 30);
+        style.visuals.extreme_bg_color = egui::Color32::from_rgb(14, 16, 20);
         cc.egui_ctx.set_style(style);
+        setup_cjk_fonts(&cc.egui_ctx);
 
         let app = Self {
             lessons: Vec::new(),
@@ -125,6 +129,10 @@ fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<LessonRef>, pas
 }
 
 impl eframe::App for App {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.055, 0.055, 0.07, 1.0]
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         while let Ok(ev) = self.rx.try_recv() {
             match ev {
@@ -187,7 +195,8 @@ impl eframe::App for App {
             ui.label("課程");
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for (i, l) in self.lessons.iter().enumerate() {
-                    if ui.selectable_label(i == self.sel, &l.lesson_id).clicked() {
+                    let label = l.label();
+                    if ui.selectable_label(i == self.sel, label).clicked() {
                         self.sel = i;
                     }
                 }
@@ -203,7 +212,9 @@ impl eframe::App for App {
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::default().fill(egui::Color32::from_rgb(16, 18, 23)))
+            .show(ctx, |ui| {
             ui.label("紀錄");
             egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
                 for l in &self.logs {
@@ -216,11 +227,36 @@ impl eframe::App for App {
     }
 }
 
+/// 載入系統 CJK 字型（egui 預設字型沒有中文字）
+fn setup_cjk_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    let candidates = [
+        r"C:\Windows\Fonts\msjh.ttc",   // 微軟正黑體
+        r"C:\Windows\Fonts\msyh.ttc",   // 微軟雅黑
+        r"C:\Windows\Fonts\simsun.ttc", // 新細明體
+    ];
+    for path in candidates {
+        if let Ok(data) = std::fs::read(path) {
+            fonts
+                .font_data
+                .insert("cjk".to_owned(), egui::FontData::from_owned(data));
+            if let Some(f) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                f.insert(0, "cjk".to_owned());
+            }
+            if let Some(f) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                f.push("cjk".to_owned());
+            }
+            break;
+        }
+    }
+    ctx.set_fonts(fonts);
+}
+
 fn main() -> Result<()> {
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 680.0])
-            .with_title("MyET 口說自動練習"),
+            .with_title("MyET 口說自動練習").with_transparent(false),
         ..Default::default()
     };
     eframe::run_native(

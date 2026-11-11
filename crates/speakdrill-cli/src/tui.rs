@@ -25,7 +25,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 #[derive(Debug, Clone)]
 pub enum Ev {
-    Catalog(Vec<String>),          // "LESSON|COURSE|title"
+    Catalog(Vec<LessonRef>),
     Log(String),
     Score(LineScore),
     LessonStart(String),
@@ -91,11 +91,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
             match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
                 Ok(cdp) => match fetch_catalog(&cdp, &cfg.server, &cfg.code, &cfg.content_type).await {
                     Ok(list) => {
-                        let items: Vec<String> = list
-                            .iter()
-                            .map(|l| format!("{}|{}|", l.lesson_id, l.course_id))
-                            .collect();
-                        let _ = tx.send(Ev::Catalog(items));
+                        let _ = tx.send(Ev::Catalog(list));
                     }
                     Err(e) => {
                         let _ = tx.send(Ev::Fatal(format!("抓目錄失敗：{e}")));
@@ -236,16 +232,9 @@ fn start_batch(
 
 fn apply(app: &mut App, ev: Ev) {
     match ev {
-        Ev::Catalog(items) => {
-            app.lessons.clear();
-            app.titles.clear();
-            for it in items {
-                let mut parts = it.split('|');
-                let lesson = parts.next().unwrap_or("").to_string();
-                let course = parts.next().unwrap_or("").to_string();
-                app.titles.push(lesson.clone());
-                app.lessons.push((lesson, course));
-            }
+        Ev::Catalog(list) => {
+            app.titles = list.iter().map(|l| l.label()).collect();
+            app.lessons = list.iter().map(|l| (l.lesson_id.clone(), l.course_id.clone())).collect();
             app.status = format!("{} 課（Enter 跑選取、b 跑全部、q 離開）", app.lessons.len());
         }
         Ev::Log(s) => {
@@ -289,17 +278,19 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
         .constraints([Constraint::Length(3), Constraint::Min(6), Constraint::Length(3)])
         .split(f.area());
 
+    let avg = if app.avg_n > 0 { app.avg_sum / app.avg_n as f64 } else { 0.0 };
     let header = Paragraph::new(TLine::from(vec![
         Span::styled(" speakdrill ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::raw(format!("  {} 課", app.lessons.len())),
         Span::raw(if app.running { "   ● 執行中" } else { "" }),
+        Span::raw(format!("   完成 {} 句  平均 {:.1}", app.total_done, avg)),
     ]))
     .block(Block::default().borders(Borders::ALL).title("speakdrill 口說自動練習"));
     f.render_widget(header, chunks[0]);
 
     let body = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+        .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
         .split(chunks[1]);
 
     let items: Vec<ListItem> = app

@@ -10,6 +10,20 @@ use crate::cdp::Cdp;
 pub struct LessonRef {
     pub lesson_id: String,
     pub course_id: String,
+    /// 課程名稱（目錄頁的 `L2` 標題），抓不到就等於 lesson_id
+    #[serde(default)]
+    pub title: String,
+}
+
+impl LessonRef {
+    /// 給 UI 顯示用：名稱優先，沒有就退回代碼
+    pub fn label(&self) -> String {
+        if self.title.is_empty() || self.title == self.lesson_id {
+            self.lesson_id.clone()
+        } else {
+            format!("{}  ({})", self.title, self.lesson_id)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,7 +32,7 @@ pub struct Line {
     pub text: String,
 }
 
-/// 從目錄頁抓出所有課程（`GoToLesson('<LessonID>','<CourseID>',…)`）。
+/// 從目錄頁抓出所有課程（`GoToLesson('<LessonID>','<CourseID>',…)` + 名稱）。
 pub async fn fetch_catalog(cdp: &Cdp, server: &str, code: &str, content_type: &str) -> Result<Vec<LessonRef>> {
     let url = format!(
         "{server}/AudreyWeb/CatalogPage.aspx?CodeName={code}&ContentType={content_type}"
@@ -27,16 +41,37 @@ pub async fn fetch_catalog(cdp: &Cdp, server: &str, code: &str, content_type: &s
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     let html = cdp.html().await?;
 
-    let re = Regex::new(r"GoToLesson\('([^']+)','([^']+)'").unwrap();
-    let mut out = Vec::new();
+    // 每個課程是一個 <a href="javascript:GoToLesson('LID','CID',...)">…<div class="L2">名稱</div>…</a>
+    let anchor_re = Regex::new(r#"(?s)GoToLesson\('([^']+)','([^']+)'[^>]*>(.*?)</a>"#).unwrap();
+    let title_re = Regex::new(r#"(?s)<div class="L2">(.*?)</div>"#).unwrap();
+    let tag_re = Regex::new(r"<[^>]+>").unwrap();
+
+    let mut out: Vec<LessonRef> = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    for c in re.captures_iter(&html) {
+    for c in anchor_re.captures_iter(&html) {
         let lesson_id = c[1].to_string();
         let course_id = c[2].to_string();
-        if seen.insert(lesson_id.clone()) {
-            out.push(LessonRef { lesson_id, course_id });
+        if !seen.insert(lesson_id.clone()) {
+            continue;
+        }
+        let title = title_re
+            .captures(&c[3])
+            .map(|t| unescape(tag_re.replace_all(&t[1], "").trim()))
+            .unwrap_or_default();
+        out.push(LessonRef { lesson_id, course_id, title });
+    }
+
+    // 有些版面的 anchor 結構不同，退回只抓 ID（名稱留空）
+    if out.is_empty() {
+        let re = Regex::new(r"GoToLesson\('([^']+)','([^']+)'").unwrap();
+        for c in re.captures_iter(&html) {
+            let lesson_id = c[1].to_string();
+            if seen.insert(lesson_id.clone()) {
+                out.push(LessonRef { lesson_id, course_id: c[2].to_string(), title: String::new() });
+            }
         }
     }
+
     if out.is_empty() {
         return Err(anyhow!("目錄頁抓不到課程，可能沒登入或 CodeName 不對"));
     }
