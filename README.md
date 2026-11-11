@@ -80,6 +80,25 @@ speakdrill init --device "Voicemeeter Input" --server https://140.125.168.213 --
 | 播放裝置音量 | 同樣拉到 100% |
 | TTS 引擎 | 自動下載 Piper（單一 exe，不需要 Python） |
 
+### 虛擬音效迴路
+
+程式需要一個「虛擬音效迴路」，把 TTS 播出去的聲音變成麥克風輸入。
+Windows **沒有** user-mode 的方法可以建立麥克風，所以一定得裝一個虛擬音效驅動。
+
+`speakdrill` 支援兩種，`init` 會自動偵測：
+
+| | VB-CABLE（推薦） | VoiceMeeter |
+|---|---|---|
+| 大小 | 1.3 MB | ~30 MB |
+| 設定 | **零設定**（播到 `CABLE Input`，`CABLE Output` 就有聲音） | 要設 strip → B1 路由 |
+| 安裝 | `speakdrill init --install-driver`（跳一次 UAC） | 自行安裝 |
+
+```bash
+speakdrill init --install-driver     # 沒偵測到裝置時，自動下載並安裝 VB-CABLE
+```
+
+> 安裝驅動需要管理員權限，過程中會跳一次 UAC，請按「是」。
+
 ### 唯一需要手動的一步
 
 Windows 只允許「用介面」設定 per-app 音訊裝置（登錄值裡有一組 Windows 產生的

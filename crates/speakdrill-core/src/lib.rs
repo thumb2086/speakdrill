@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod cdp;
+pub mod devices;
 pub mod config;
 pub mod lesson;
 pub mod pipeline;

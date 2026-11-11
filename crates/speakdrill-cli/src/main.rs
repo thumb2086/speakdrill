@@ -25,6 +25,8 @@ enum Cmd {
         #[arg(long)] device: Option<String>,
         #[arg(long)] server: Option<String>,
         #[arg(long)] code: Option<String>,
+        /// 找不到虛擬音效裝置時，自動下載並安裝 VB-CABLE（會跳 UAC）
+        #[arg(long)] install_driver: bool,
     },
     /// 檢查環境（port / 登入 / 裝置 / VoiceMeeter / TTS）
     Doctor,
@@ -76,7 +78,9 @@ fn main() -> Result<()> {
 
     let cmd = cli.cmd.unwrap_or(Cmd::Tui);
     match cmd {
-        Cmd::Init { device, server, code } => rt.block_on(cmd_init(device, server, code)),
+        Cmd::Init { device, server, code, install_driver } => {
+            rt.block_on(cmd_init(device, server, code, install_driver))
+        }
         Cmd::Doctor => rt.block_on(cmd_doctor()),
         Cmd::Reset { yes } => rt.block_on(cmd_reset(yes)),
         Cmd::Run { lesson, course, resume, pass } => {
@@ -92,7 +96,12 @@ fn main() -> Result<()> {
 
 // ---------------- init ----------------
 
-async fn cmd_init(device: Option<String>, server: Option<String>, code: Option<String>) -> Result<()> {
+async fn cmd_init(
+    device: Option<String>,
+    server: Option<String>,
+    code: Option<String>,
+    install_driver: bool,
+) -> Result<()> {
     println!("== speakdrill init ==");
     let mut cfg = Config::load_or_default();
     if let Some(d) = device { cfg.play_device = d; }
@@ -122,20 +131,44 @@ async fn cmd_init(device: Option<String>, server: Option<String>, code: Option<S
         Err(e) => println!("  ⚠ 安裝 piper 失敗：{e}"),
     }
 
-    println!("\n[3/5] VoiceMeeter 路由");
-    match Vm::connect() {
-        Ok(vm) => {
-            let (strip, bus) = cfg
-                .vm_strip
-                .zip(cfg.vm_bus)
-                .unwrap_or_else(|| vm.default_route());
-            vm.route_to_b1(strip)?;
-            vm.set(&format!("bus[{bus}].mute"), 0.0).ok();
-            println!("  {} ：strip[{strip}] → bus[{bus}] (B1)", vm.kind());
-            cfg.vm_strip = Some(strip);
-            cfg.vm_bus = Some(bus);
+    if install_driver && speakdrill_core::devices::detect_route().is_none() {
+        println!("  嘗試安裝 VB-CABLE…");
+        if let Err(e) = speakdrill_core::devices::install_vb_cable(&mut |m| println!("  {m}")) {
+            println!("  ⚠ 安裝失敗：{e}");
         }
-        Err(e) => println!("  ⚠ {e}"),
+    }
+
+    println!("\n[3/5] 虛擬音效迴路");
+    match speakdrill_core::devices::detect_route() {
+        Some(r) => {
+            println!("  使用 {}：", r.kind());
+            println!("    播放 → {}", r.play_device);
+            println!("    App 麥克風 → {}", r.mic_device);
+            cfg.play_device = r.play_device.clone();
+            if r.needs_vm {
+                if let Ok(vm) = Vm::connect() {
+                    let (strip, bus) = cfg
+                        .vm_strip
+                        .zip(cfg.vm_bus)
+                        .unwrap_or_else(|| vm.default_route());
+                    let _ = vm.route_to_b1(strip);
+                    let _ = vm.set(&format!("bus[{bus}].mute"), 0.0);
+                    cfg.vm_strip = Some(strip);
+                    cfg.vm_bus = Some(bus);
+                    println!("    VoiceMeeter 路由：strip[{strip}] → bus[{bus}]");
+                }
+                cfg.auto_vm_setup = true;
+            } else {
+                cfg.vm_strip = None;
+                cfg.vm_bus = None;
+                cfg.auto_vm_setup = false;
+            }
+        }
+        None => {
+            println!("  ⚠ 找不到虛擬音效裝置");
+            println!("    加 --install-driver 自動安裝 VB-CABLE（約 1.3 MB，需管理員）");
+            println!("    或自行安裝 VoiceMeeter");
+        }
     }
 
     println!("\n[4/5] Windows 裝置音量");
@@ -221,6 +254,20 @@ async fn cmd_doctor() -> Result<()> {
             }
         }
         Err(e) => { println!("✗ {e}"); bad += 1; }
+    }
+
+    print!("[迴路] … ");
+    match speakdrill_core::devices::detect_route() {
+        Some(r) => println!(
+            "{}（播放 → {}／麥克風 → {}）",
+            r.kind(),
+            r.play_device,
+            r.mic_device
+        ),
+        None => {
+            println!("✗ 找不到虛擬音效裝置（跑 speakdrill init --install-driver）");
+            bad += 1;
+        }
     }
 
     print!("[輸出裝置] … ");
