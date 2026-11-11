@@ -131,7 +131,7 @@ async fn cmd_init(
         Err(e) => println!("  ⚠ 安裝 piper 失敗：{e}"),
     }
 
-    if install_driver && speakdrill_core::devices::detect_route().is_none() {
+    if install_driver && !speakdrill_core::devices::has_vb_cable() {
         println!("  嘗試安裝 VB-CABLE…");
         if let Err(e) = speakdrill_core::devices::install_vb_cable(&mut |m| println!("  {m}")) {
             println!("  ⚠ 安裝失敗：{e}");
@@ -139,11 +139,24 @@ async fn cmd_init(
     }
 
     println!("\n[3/5] 虛擬音效迴路");
-    match speakdrill_core::devices::detect_route() {
+    let mut chosen: Option<speakdrill_core::devices::VirtualRoute> = None;
+    for r in speakdrill_core::devices::routes() {
+        match AudioPlayer::new(&r.play_device) {
+            Ok(p) => {
+                println!("  使用 {}：", r.kind());
+                println!("    播放 → {}", p.device_name);
+                println!("    App 麥克風 → {}", r.mic_device);
+                chosen = Some(r);
+                break;
+            }
+            Err(e) => {
+                println!("  {} 無法開啟（{}），換下一個", r.kind(), e);
+            }
+        }
+    }
+
+    match chosen {
         Some(r) => {
-            println!("  使用 {}：", r.kind());
-            println!("    播放 → {}", r.play_device);
-            println!("    App 麥克風 → {}", r.mic_device);
             cfg.play_device = r.play_device.clone();
             if r.needs_vm {
                 if let Ok(vm) = Vm::connect() {
@@ -165,9 +178,9 @@ async fn cmd_init(
             }
         }
         None => {
-            println!("  ⚠ 找不到虛擬音效裝置");
-            println!("    加 --install-driver 自動安裝 VB-CABLE（約 1.3 MB，需管理員）");
-            println!("    或自行安裝 VoiceMeeter");
+            println!("  ⚠ 沒有可用的虛擬音效迴路");
+            println!("    加 --install-driver 安裝 VB-CABLE，或自行安裝 VoiceMeeter");
+            println!("    若已安裝但被其他程式佔用，請重開機後再跑 init");
         }
     }
 
@@ -257,16 +270,35 @@ async fn cmd_doctor() -> Result<()> {
     }
 
     print!("[迴路] … ");
-    match speakdrill_core::devices::detect_route() {
-        Some(r) => println!(
-            "{}（播放 → {}／麥克風 → {}）",
-            r.kind(),
-            r.play_device,
-            r.mic_device
-        ),
-        None => {
-            println!("✗ 找不到虛擬音效裝置（跑 speakdrill init --install-driver）");
-            bad += 1;
+    {
+        let routes = speakdrill_core::devices::routes();
+        let active = routes
+            .iter()
+            .find(|r| r.play_device == cfg.play_device)
+            .cloned();
+        match active {
+            Some(r) => println!(
+                "{}（播放 → {}／麥克風 → {}）",
+                r.kind(),
+                r.play_device,
+                r.mic_device
+            ),
+            None => {
+                if routes.is_empty() {
+                    println!("✗ 找不到虛擬音效裝置（跑 speakdrill init --install-driver）");
+                    bad += 1;
+                } else {
+                    println!(
+                        "⚠ 設定用「{}」，但目前偵測到 {}（跑 speakdrill init 重設）",
+                        cfg.play_device,
+                        routes
+                            .iter()
+                            .map(|r| r.kind())
+                            .collect::<Vec<_>>()
+                            .join(" / ")
+                    );
+                }
+            }
         }
     }
 

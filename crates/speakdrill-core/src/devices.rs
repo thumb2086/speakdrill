@@ -55,6 +55,28 @@ fn pick(names: &[String], needle: &str) -> Option<String> {
         .cloned()
 }
 
+/// 是否已安裝 VB-CABLE
+pub fn has_vb_cable() -> bool {
+    let outs = render_names();
+    let ins = capture_names();
+    pick(&outs, "CABLE Input").is_some() && pick(&ins, "CABLE Output").is_some()
+}
+
+/// 所有可用的迴路，優先序：VB-CABLE → VoiceMeeter
+pub fn routes() -> Vec<VirtualRoute> {
+    let outs = render_names();
+    let ins = capture_names();
+    let mut v = Vec::new();
+
+    if let (Some(p), Some(m)) = (pick(&outs, "CABLE Input"), pick(&ins, "CABLE Output")) {
+        v.push(VirtualRoute { play_device: p, mic_device: m, needs_vm: false });
+    }
+    if let (Some(p), Some(m)) = (pick(&outs, "Voicemeeter Input"), pick(&ins, "Voicemeeter Out B1")) {
+        v.push(VirtualRoute { play_device: p, mic_device: m, needs_vm: true });
+    }
+    v
+}
+
 /// 偵測目前可用的虛擬迴路（優先 VB-CABLE，其次 VoiceMeeter）
 pub fn detect_route() -> Option<VirtualRoute> {
     let outs = render_names();
