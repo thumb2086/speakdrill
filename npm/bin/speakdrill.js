@@ -23,7 +23,7 @@ if (!bin) {
   console.error(
     `[speakdrill] 找不到可執行檔（${dir}）。\n` +
       `      請重新安裝：npm rebuild speakdrill\n` +
-      `      或從 https://github.com/yourname/speakdrill/releases 下載`
+      `      或從 https://github.com/thumb2086/speakdrill/releases 下載`
   );
   process.exit(1);
 }

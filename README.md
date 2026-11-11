@@ -53,7 +53,7 @@ speakdrill init
 ### 從原始碼
 
 ```bash
-git clone https://github.com/yourname/speakdrill
+git clone https://github.com/thumb2086/speakdrill
 cd speakdrill
 cargo build --release
 ./target/release/speakdrill init

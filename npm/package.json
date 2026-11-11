@@ -6,9 +6,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourname/speakdrill.git"
+    "url": "https://github.com/thumb2086/speakdrill.git"
   },
-  "homepage": "https://github.com/yourname/speakdrill#readme",
+  "homepage": "https://github.com/thumb2086/speakdrill#readme",
   "bin": {
     "speakdrill": "bin/speakdrill.js"
   },

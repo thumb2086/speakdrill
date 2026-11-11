@@ -5,7 +5,7 @@
  * 環境變數：
  *   SPEAKDRILL_SKIP_DOWNLOAD=1   跳過下載（本機開發用，會直接用 target/ 的執行檔）
  *   SPEAKDRILL_VERSION           指定版本（預設讀 package.json）
- *   SPEAKDRILL_REPO              覆寫 GitHub repo（預設 yourname/speakdrill）
+ *   SPEAKDRILL_REPO              覆寫 GitHub repo（預設 thumb2086/speakdrill）
  */
 const fs = require('fs');
 const path = require('path');
@@ -14,7 +14,7 @@ const { execFileSync } = require('child_process');
 
 const pkg = require('../package.json');
 const VERSION = process.env.SPEAKDRILL_VERSION || pkg.version;
-const REPO = process.env.SPEAKDRILL_REPO || 'yourname/speakdrill';
+const REPO = process.env.SPEAKDRILL_REPO || 'thumb2086/speakdrill';
 
 if (process.env.SPEAKDRILL_SKIP_DOWNLOAD === '1') {
   console.log('[speakdrill] SPEAKDRILL_SKIP_DOWNLOAD=1，跳過下載');

@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["speakdrill contributors"]
-repository = "https://github.com/yourname/speakdrill"
+repository = "https://github.com/thumb2086/speakdrill"
 
 [workspace.dependencies]
 anyhow = "1"
