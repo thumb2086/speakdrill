@@ -1,0 +1,18 @@
+[package]
+name = "myet-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "myet-gui"
+path = "src/main.rs"
+
+[dependencies]
+myet-core = { path = "../myet-core" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+eframe = { version = "0.28", default-features = false, features = ["wgpu", "default_fonts"] }
+egui = "0.28"

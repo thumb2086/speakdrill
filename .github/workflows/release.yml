@@ -1,0 +1,74 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            dir: win32-x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            dir: linux-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            dir: darwin-arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} -p myet-cli -p myet-gui
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = "dist/${{ matrix.dir }}"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/myet.exe" $out
+          Copy-Item "target/${{ matrix.target }}/release/myet-gui.exe" $out
+          Compress-Archive -Path "$out/*" -DestinationPath "myet-${{ github.ref_name }}-${{ matrix.dir }}.zip"
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          out="dist/${{ matrix.dir }}"
+          mkdir -p "$out"
+          cp "target/${{ matrix.target }}/release/myet" "$out"
+          cp "target/${{ matrix.target }}/release/myet-gui" "$out"
+          chmod +x "$out"/*
+          tar -czf "myet-${GITHUB_REF_NAME}-${{ matrix.dir }}.tar.gz" -C "$out" .
+
+      - name: Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            myet-*.zip
+            myet-*.tar.gz
+
+  npm:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Publish
+        working-directory: npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

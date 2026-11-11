@@ -1,0 +1,24 @@
+{
+  "name": "myet-practice",
+  "version": "0.1.0",
+  "description": "MyET 口說自動練習：TTS 驅動、VoiceMeeter 迴路、自動評分（Rust，含 TUI / 原生 GUI）",
+  "keywords": ["myet", "speaking", "shadowing", "tts", "voicemeeter", "english", "cli", "tui", "gui"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourname/myet-practice.git"
+  },
+  "homepage": "https://github.com/yourname/myet-practice#readme",
+  "bin": {
+    "myet": "bin/myet.js"
+  },
+  "files": ["bin/", "scripts/", "README.md", "LICENSE"],
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": ["win32", "darwin", "linux"],
+  "cpu": ["x64", "arm64"]
+}
