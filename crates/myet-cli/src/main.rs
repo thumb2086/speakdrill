@@ -317,11 +317,12 @@ async fn cmd_batch(
 
 fn print_report(r: &LessonReport) {
     println!("  {} — {}/{} 句，平均 {}，{} 秒",
-        r.title, r.lines.len(), r.lines.len(), r.avg, r.elapsed_secs);
+        r.title, r.lines.len(), r.total_lines, r.avg, r.elapsed_secs);
     if let Ok(p) = save_report(r) {
         println!("  報告：{}", p.display());
     }
 }
+
 
 
 

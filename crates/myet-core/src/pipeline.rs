@@ -25,6 +25,7 @@ pub struct LineScore {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LessonReport {
     pub lesson_id: String,
+    pub total_lines: usize,
     pub title: String,
     pub lines: Vec<LineScore>,
     pub avg: f64,
@@ -377,6 +378,7 @@ pub async fn run_lesson(
 
     Ok(LessonReport {
         lesson_id: lesson_id.to_string(),
+        total_lines: lines.len(),
         title,
         lines: scores,
         avg: (avg * 10.0).round() / 10.0,
@@ -408,3 +410,4 @@ pub async fn ensure_logged_in(cdp: &Cdp, server: &str) -> Result<()> {
 }
 
 pub fn _unused_path_marker(_p: &Path) {}
+

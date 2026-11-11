@@ -144,7 +144,7 @@ impl eframe::App for App {
                     self.avg_n += 1;
                 }
                 Ev::LessonDone(r) => self.logs.push(format!(
-                    "✓ {} 平均 {}（{} 句 / {} 秒）", r.lesson_id, r.avg, r.lines.len(), r.elapsed_secs
+                    "✓ {} 平均 {}（{}/{} 句 / {} 秒）", r.lesson_id, r.avg, r.lines.len(), r.total_lines, r.elapsed_secs
                 )),
                 Ev::Done => {
                     self.running = false;
@@ -230,3 +230,4 @@ fn main() -> Result<()> {
     )
     .map_err(|e| anyhow::anyhow!("GUI 啟動失敗：{e}"))
 }
+
