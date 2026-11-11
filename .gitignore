@@ -9,3 +9,4 @@ pid.txt
 dist
 .DS_Store
 Thumbs.db
+npm/*.tgz
