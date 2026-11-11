@@ -21,14 +21,19 @@ if (process.env.SPEAKDRILL_SKIP_DOWNLOAD === '1') {
   process.exit(0);
 }
 
-const isWin = process.platform === 'win32';
-const exes = isWin ? ['speakdrill.exe', 'speakdrill-gui.exe'] : ['speakdrill', 'speakdrill-gui'];
+if (process.platform !== 'win32') {
+  console.log(
+    `[speakdrill] 目前只支援 Windows（需要 VoiceMeeter）。你的平台是 ${process.platform}，跳過安裝。`
+  );
+  process.exit(0);
+}
+
+const exes = ['speakdrill.exe', 'speakdrill-gui.exe'];
 const dir = `${process.platform}-${process.arch}`;
 const outDir = path.join(__dirname, '..', 'bin', 'binaries', dir);
 
-const ext = isWin ? 'zip' : 'tar.gz';
 const tag = `v${VERSION}`;
-const asset = `speakdrill-${tag}-${dir}.${ext}`;
+const asset = `speakdrill-${tag}-${dir}.zip`;
 const url = `https://github.com/${REPO}/releases/download/${tag}/${asset}`;
 
 function download(u, dest) {
@@ -68,25 +73,13 @@ function download(u, dest) {
   console.log(`[speakdrill] 下載 ${url}`);
   try {
     await download(url, archive);
-
-    if (ext === 'zip') {
-      execFileSync(
-        'powershell',
-        ['-NoProfile', '-Command',
-          `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${outDir}' -Force`],
-        { stdio: 'inherit' }
-      );
-    } else {
-      execFileSync('tar', ['-xzf', archive, '-C', outDir], { stdio: 'inherit' });
-    }
+    execFileSync(
+      'powershell',
+      ['-NoProfile', '-Command',
+        `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${outDir}' -Force`],
+      { stdio: 'inherit' }
+    );
     fs.unlinkSync(archive);
-
-    if (!isWin) {
-      for (const f of exes) {
-        const p = path.join(outDir, f);
-        if (fs.existsSync(p)) fs.chmodSync(p, 0o755);
-      }
-    }
     console.log(`[speakdrill] 安裝完成 → ${outDir}`);
   } catch (e) {
     console.error(`[speakdrill] 下載失敗：${e.message}`);
