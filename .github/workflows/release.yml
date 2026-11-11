@@ -50,11 +50,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.14.0" # Trusted publishing 最低需求
+          node-version: "24"
           registry-url: https://registry.npmjs.org
 
-      - name: Upgrade npm
-        run: npm install -g npm@latest # 需要 >= 11.5.1
+      - name: Ensure npm >= 11.5.1
+        run: npm install -g npm@11
 
       - name: Show versions
         run: |
