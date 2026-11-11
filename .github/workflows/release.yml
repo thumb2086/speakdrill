@@ -3,8 +3,15 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+
+# npm Trusted Publisher（OIDC）需要 id-token: write
+permissions:
+  contents: write # 上傳 GitHub Release
+  id-token: write # npm 以 OIDC 換短期發佈權杖
 
 jobs:
+  # ── 1. 建 Windows 二進位（CLI + GUI）並發 Release ─────────────
   build:
     runs-on: windows-latest
     steps:
@@ -12,10 +19,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Build
+      - name: Build (CLI + GUI)
         run: cargo build --release -p speakdrill-cli -p speakdrill-gui
 
       - name: Package
@@ -23,27 +29,40 @@ jobs:
         run: |
           $out = "dist/win32-x64"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          Copy-Item "target/release/speakdrill.exe" $out
-          Copy-Item "target/release/speakdrill-gui.exe" $out
-          Copy-Item "scripts/kokoro_tts.py" $out
-          Compress-Archive -Path "$out/*" -DestinationPath "speakdrill-${{ github.ref_name }}-win32-x64.zip"
+          Copy-Item "target/release/speakdrill.exe"     "$out/"
+          Copy-Item "target/release/speakdrill-gui.exe" "$out/"
+          Copy-Item "scripts/kokoro_tts.py"             "$out/"
+          Compress-Archive -Path "$out/*" `
+            -DestinationPath "speakdrill-${{ github.ref_name }}-win32-x64.zip"
 
-      - name: Upload
+      - name: Release
         uses: softprops/action-gh-release@v2
         with:
           files: speakdrill-*.zip
+          generate_release_notes: true
 
+  # ── 2. 發佈 npm 套件（Trusted Publisher / OIDC，不用 token）────
   npm:
     needs: build
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "22.14.0" # Trusted publishing 最低需求
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false # release build 不要用快取
+
+      - name: Upgrade npm
+        run: npm install -g npm@latest # 需要 >= 11.5.1
+
+      - name: Show versions
+        run: |
+          node --version
+          npm --version
+
       - name: Publish
         working-directory: npm
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # 注意：不要設 NODE_AUTH_TOKEN，npm 會自動偵測 OIDC
