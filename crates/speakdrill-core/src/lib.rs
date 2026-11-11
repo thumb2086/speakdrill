@@ -5,6 +5,7 @@ pub mod cdp;
 pub mod config;
 pub mod lesson;
 pub mod pipeline;
+pub mod piper;
 pub mod tts;
 pub mod vm;
 

@@ -59,7 +59,7 @@ cargo build --release
 ./target/release/speakdrill init
 ```
 
-需要 Rust 1.75+。TTS 另外需要 `pip install kokoro-onnx soundfile`，或自備 piper。
+需要 Rust 1.75+。**TTS 不需要 Python**：`speakdrill init` 會自動下載 Piper + 英文聲音檔（約 82 MB）。
 
 ---
 
@@ -78,7 +78,7 @@ speakdrill init --device "Voicemeeter Input" --server https://140.125.168.213 --
 | VoiceMeeter 路由 | 只有 TTS 那條 strip 送到 B1，其他關掉 |
 | **B1 裝置音量** | 預設竟然是 **24.3%**，會讓評分引擎判「太小聲」。自動拉到 100% |
 | 播放裝置音量 | 同樣拉到 100% |
-| TTS 引擎 | 有 piper 用 piper，否則用內附的 Kokoro 轉接器 |
+| TTS 引擎 | 自動下載 Piper（單一 exe，不需要 Python） |
 
 ### 唯一需要手動的一步
 

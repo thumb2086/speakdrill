@@ -110,31 +110,16 @@ async fn cmd_init(device: Option<String>, server: Option<String>, code: Option<S
     }
 
     println!("\n[2/5] TTS 引擎");
-    match speakdrill_core::tts::find_piper() {
-        Some(p) => {
-            println!("  找到 piper：{}", p.display());
-            let model = dirs_model();
-            if model.exists() {
-                println!("  找到聲音檔：{}", model.display());
-                cfg.tts.engine = speakdrill_core::TtsEngine::Piper {
-                    exe: p.display().to_string(),
-                    model: model.display().to_string(),
-                };
-            } else {
-                println!("  ⚠ 找不到聲音檔（{}），沿用現有命令式 TTS", model.display());
-            }
+    match speakdrill_core::piper::ensure_piper(&mut |m| println!("  {m}")) {
+        Ok(p) => {
+            cfg.tts.engine = speakdrill_core::TtsEngine::Piper {
+                exe: p.exe.display().to_string(),
+                model: p.model.display().to_string(),
+            };
+            println!("  piper: {}", p.exe.display());
+            println!("  voice: {}", p.model.display());
         }
-        None => {
-            match resolve_kokoro_script() {
-                Some(p) => {
-                    cfg.tts.engine = speakdrill_core::TtsEngine::Command {
-                        template: format!("python \"{}\" {{textfile}} {{out}}", p.display()),
-                    };
-                    println!("  使用內附 Kokoro 轉接器：{}", p.display());
-                }
-                None => println!("  ⚠ 找不到 piper 也找不到 scripts/kokoro_tts.py，請手動設定 tts.engine"),
-            }
-        }
+        Err(e) => println!("  ⚠ 安裝 piper 失敗：{e}"),
     }
 
     println!("\n[3/5] VoiceMeeter 路由");

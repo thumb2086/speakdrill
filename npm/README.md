@@ -32,7 +32,7 @@ speakdrill reset                 # 還原音訊路由
 ## 前置需求
 
 1. **VoiceMeeter**（Banana 或 Potato）
-2. **一個 TTS**：`pip install kokoro-onnx soundfile`，或自備 [piper](https://github.com/rhasspy/piper)
+2. **不需要額外裝 TTS**：`speakdrill init` 自動下載 Piper
 3. 目標 App 需開啟 debug port：
    `--remote-debugging-port=9222 --remote-allow-origins=*`
 4. 在 `ms-settings:apps-volume` 把目標 App 的**輸入裝置**設成 `Voicemeeter Out B1`
