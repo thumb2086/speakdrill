@@ -54,7 +54,7 @@ impl Default for Config {
 pub fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("myet-practice")
+        .join("speakdrill")
 }
 
 pub fn config_path() -> PathBuf {
@@ -64,7 +64,7 @@ pub fn config_path() -> PathBuf {
 pub fn cache_dir() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("myet-practice")
+        .join("speakdrill")
 }
 
 pub fn audio_cache(lesson: &str) -> PathBuf {

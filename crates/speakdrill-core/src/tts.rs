@@ -98,8 +98,8 @@ pub fn find_piper() -> Option<PathBuf> {
         return Some(p);
     }
     let candidates = [
-        dirs::data_dir().map(|d| d.join("myet-practice").join("piper").join("piper.exe")),
-        dirs::config_dir().map(|d| d.join("myet-practice").join("piper").join("piper.exe")),
+        dirs::data_dir().map(|d| d.join("speakdrill").join("piper").join("piper.exe")),
+        dirs::config_dir().map(|d| d.join("speakdrill").join("piper").join("piper.exe")),
     ];
     for c in candidates.into_iter().flatten() {
         if c.exists() {

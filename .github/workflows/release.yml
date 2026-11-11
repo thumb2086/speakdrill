@@ -29,7 +29,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} -p myet-cli -p myet-gui
+        run: cargo build --release --target ${{ matrix.target }} -p speakdrill-cli -p speakdrill-gui
 
       - name: Package (windows)
         if: runner.os == 'Windows'
@@ -37,26 +37,26 @@ jobs:
         run: |
           $out = "dist/${{ matrix.dir }}"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/myet.exe" $out
-          Copy-Item "target/${{ matrix.target }}/release/myet-gui.exe" $out
-          Compress-Archive -Path "$out/*" -DestinationPath "myet-${{ github.ref_name }}-${{ matrix.dir }}.zip"
+          Copy-Item "target/${{ matrix.target }}/release/speakdrill.exe" $out
+          Copy-Item "target/${{ matrix.target }}/release/speakdrill-gui.exe" $out
+          Compress-Archive -Path "$out/*" -DestinationPath "speakdrill-${{ github.ref_name }}-${{ matrix.dir }}.zip"
 
       - name: Package (unix)
         if: runner.os != 'Windows'
         run: |
           out="dist/${{ matrix.dir }}"
           mkdir -p "$out"
-          cp "target/${{ matrix.target }}/release/myet" "$out"
-          cp "target/${{ matrix.target }}/release/myet-gui" "$out"
+          cp "target/${{ matrix.target }}/release/speakdrill" "$out"
+          cp "target/${{ matrix.target }}/release/speakdrill-gui" "$out"
           chmod +x "$out"/*
-          tar -czf "myet-${GITHUB_REF_NAME}-${{ matrix.dir }}.tar.gz" -C "$out" .
+          tar -czf "speakdrill-${GITHUB_REF_NAME}-${{ matrix.dir }}.tar.gz" -C "$out" .
 
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            myet-*.zip
-            myet-*.tar.gz
+            speakdrill-*.zip
+            speakdrill-*.tar.gz
 
   npm:
     needs: build

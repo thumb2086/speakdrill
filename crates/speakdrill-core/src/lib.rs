@@ -1,4 +1,4 @@
-//! myet-practice core：把 MyET 口說練習自動化的所有零件。
+//! speakdrill core：把 MyET 口說練習自動化的所有零件。
 
 pub mod audio;
 pub mod cdp;

@@ -1,6 +1,6 @@
 //! 音訊播放：用 cpal 指定裝置、零延遲餵樣本。
 //!
-//! 為什麼要自己寫：MyET 的錄音視窗只有 ~2.7 秒，
+//! 為什麼要自己寫：speakdrill 的錄音視窗只有 ~2.7 秒，
 //! 每次啟動外部播放器（Python/ffplay）都會吃掉 0.5~1 秒。
 //! 這裡把 stream 開好常駐，播歌只是把樣本塞進環形緩衝。
 //!
@@ -42,7 +42,7 @@ impl AudioPlayer {
         let playing3 = playing.clone();
 
         let handle = std::thread::Builder::new()
-            .name("myet-audio".into())
+            .name("speakdrill-audio".into())
             .spawn(move || {
                 let host = cpal::default_host();
                 let device = host

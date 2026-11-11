@@ -1,8 +1,8 @@
-//! myet — MyET 口說自動練習 CLI / TUI
+//! speakdrill — speakdrill 口說自動練習 CLI / TUI
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use myet_core::{
+use speakdrill_core::{
     audio::list_outputs, config::{cache_dir, config_path, Config},
     ensure_logged_in, fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonReport,
     RunOptions, SilentProgress, Vm,
@@ -11,7 +11,7 @@ use myet_core::{
 mod tui;
 
 #[derive(Parser)]
-#[command(name = "myet", version, about = "MyET 口說自動練習（TTS → VoiceMeeter → MyET 自動評分）")]
+#[command(name = "speakdrill", version, about = "MyET 口說練習自動化：TTS 驅動、VoiceMeeter 迴路、分數報告")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -82,7 +82,7 @@ fn main() -> Result<()> {
 // ---------------- init ----------------
 
 async fn cmd_init(device: Option<String>, server: Option<String>, code: Option<String>) -> Result<()> {
-    println!("== myet init ==");
+    println!("== speakdrill init ==");
     let mut cfg = Config::load_or_default();
     if let Some(d) = device { cfg.play_device = d; }
     if let Some(s) = server { cfg.server = s; }
@@ -99,13 +99,13 @@ async fn cmd_init(device: Option<String>, server: Option<String>, code: Option<S
     }
 
     println!("\n[2/5] TTS 引擎");
-    match myet_core::tts::find_piper() {
+    match speakdrill_core::tts::find_piper() {
         Some(p) => {
             println!("  找到 piper：{}", p.display());
             let model = dirs_model();
             if model.exists() {
                 println!("  找到聲音檔：{}", model.display());
-                cfg.tts.engine = myet_core::TtsEngine::Piper {
+                cfg.tts.engine = speakdrill_core::TtsEngine::Piper {
                     exe: p.display().to_string(),
                     model: model.display().to_string(),
                 };
@@ -113,7 +113,17 @@ async fn cmd_init(device: Option<String>, server: Option<String>, code: Option<S
                 println!("  ⚠ 找不到聲音檔（{}），沿用現有命令式 TTS", model.display());
             }
         }
-        None => println!("  沒有 piper，沿用命令式 TTS：{:?}", cfg.tts.engine),
+        None => {
+            match resolve_kokoro_script() {
+                Some(p) => {
+                    cfg.tts.engine = speakdrill_core::TtsEngine::Command {
+                        template: format!("python \"{}\" {{textfile}} {{out}}", p.display()),
+                    };
+                    println!("  使用內附 Kokoro 轉接器：{}", p.display());
+                }
+                None => println!("  ⚠ 找不到 piper 也找不到 scripts/kokoro_tts.py，請手動設定 tts.engine"),
+            }
+        }
     }
 
     println!("\n[3/5] VoiceMeeter 路由");
@@ -135,11 +145,11 @@ async fn cmd_init(device: Option<String>, server: Option<String>, code: Option<S
     println!("\n[4/5] Windows 裝置音量");
     #[cfg(windows)]
     {
-        match myet_core::winvol::set_volume("Voicemeeter Out B1", true, 1.0) {
+        match speakdrill_core::winvol::set_volume("Voicemeeter Out B1", true, 1.0) {
             Ok(n) => println!("  錄音裝置 B1：{n} 個已設 100%"),
             Err(e) => println!("  ⚠ B1 音量：{e}"),
         }
-        match myet_core::winvol::set_volume(&cfg.play_device, false, 1.0) {
+        match speakdrill_core::winvol::set_volume(&cfg.play_device, false, 1.0) {
             Ok(n) => println!("  播放裝置：{n} 個已設 100%"),
             Err(e) => println!("  ⚠ 播放音量：{e}"),
         }
@@ -161,16 +171,36 @@ async fn cmd_init(device: Option<String>, server: Option<String>, code: Option<S
 }
 
 fn dirs_model() -> std::path::PathBuf {
-    myet_core::config::config_dir()
+    speakdrill_core::config::config_dir()
         .join("piper")
         .join("en_US-lessac-medium.onnx")
+}
+
+/// 找內附的 Kokoro 轉接器（原始碼執行或 npm 安裝都可能在不同層）
+fn resolve_kokoro_script() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let mut dir = exe.parent()?.to_path_buf();
+    for _ in 0..4 {
+        let p = dir.join("scripts").join("kokoro_tts.py");
+        if p.exists() {
+            return Some(p);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    let cwd = std::env::current_dir().ok()?.join("scripts").join("kokoro_tts.py");
+    if cwd.exists() {
+        return Some(cwd);
+    }
+    None
 }
 
 // ---------------- doctor ----------------
 
 async fn cmd_doctor() -> Result<()> {
     let cfg = Config::load_or_default();
-    println!("== myet doctor ==\n設定檔：{}", config_path().display());
+    println!("== speakdrill doctor ==\n設定檔：{}", config_path().display());
 
     let mut bad = 0;
 
@@ -202,12 +232,12 @@ async fn cmd_doctor() -> Result<()> {
     #[cfg(windows)]
     {
         print!("[裝置音量] … ");
-        match myet_core::winvol::list_endpoints() {
+        match speakdrill_core::winvol::list_endpoints() {
             Ok(list) => {
                 let b1 = list.iter().find(|(k, n, _)| k == "capture" && n.contains("Out B1"));
                 match b1 {
                     Some((_, n, v)) => println!("{n} = {:.1}%{}", v * 100.0,
-                        if *v < 0.9 { "  ⚠ 太低，跑 myet init" } else { "" }),
+                        if *v < 0.9 { "  ⚠ 太低，跑 speakdrill init" } else { "" }),
                     None => { println!("找不到 Voicemeeter Out B1"); bad += 1; }
                 }
             }
@@ -217,14 +247,14 @@ async fn cmd_doctor() -> Result<()> {
 
     print!("[TTS] … ");
     match &cfg.tts.engine {
-        myet_core::TtsEngine::Piper { exe, model } => {
+        speakdrill_core::TtsEngine::Piper { exe, model } => {
             if std::path::Path::new(exe).exists() && std::path::Path::new(model).exists() {
                 println!("piper OK");
             } else {
                 println!("✗ piper 或 model 不存在"); bad += 1;
             }
         }
-        myet_core::TtsEngine::Command { template } => println!("command: {template}"),
+        speakdrill_core::TtsEngine::Command { template } => println!("command: {template}"),
     }
 
     println!("\n快取：{}", cache_dir().display());
@@ -235,7 +265,7 @@ async fn cmd_doctor() -> Result<()> {
 // ---------------- reset ----------------
 
 async fn cmd_reset(yes: bool) -> Result<()> {
-    println!("== myet reset ==");
+    println!("== speakdrill reset ==");
     match Vm::connect() {
         Ok(vm) => {
             let n = match vm.vm_type { 1 => 3, 2 => 5, 3 => 8, _ => 5 };
@@ -254,7 +284,7 @@ async fn cmd_reset(yes: bool) -> Result<()> {
             println!("已刪除設定檔 {}", p.display());
         }
     } else {
-        println!("\n要清掉 MyET 的 per-app 輸入裝置，只能手動：");
+        println!("\n要清掉 speakdrill 的 per-app 輸入裝置，只能手動：");
         println!("  ms-settings:apps-volume → English-Chinese-Japanese → 輸入裝置 → 預設");
         println!("\n（加 --yes 可一併刪除設定檔）");
     }

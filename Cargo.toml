@@ -1,13 +1,13 @@
 [workspace]
-members = ["crates/myet-core", "crates/myet-cli", "crates/myet-gui"]
+members = ["crates/speakdrill-core", "crates/speakdrill-cli", "crates/speakdrill-gui"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["myet-practice contributors"]
-repository = "https://github.com/yourname/myet-practice"
+authors = ["speakdrill contributors"]
+repository = "https://github.com/yourname/speakdrill"
 
 [workspace.dependencies]
 anyhow = "1"

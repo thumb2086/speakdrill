@@ -1,16 +1,16 @@
 {
-  "name": "myet-practice",
+  "name": "speakdrill",
   "version": "0.1.0",
-  "description": "MyET 口說自動練習：TTS 驅動、VoiceMeeter 迴路、自動評分（Rust，含 TUI / 原生 GUI）",
-  "keywords": ["myet", "speaking", "shadowing", "tts", "voicemeeter", "english", "cli", "tui", "gui"],
+  "description": "口說課程自動化練習：用 TTS 產生示範語音、逐句驅動課程演練、輸出分數報告（Rust，含 TUI / 原生 GUI）",
+  "keywords": ["speaking", "shadowing", "drill", "tts", "voicemeeter", "english", "cli", "tui", "gui"],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourname/myet-practice.git"
+    "url": "https://github.com/yourname/speakdrill.git"
   },
-  "homepage": "https://github.com/yourname/myet-practice#readme",
+  "homepage": "https://github.com/yourname/speakdrill#readme",
   "bin": {
-    "myet": "bin/myet.js"
+    "speakdrill": "bin/speakdrill.js"
   },
   "files": ["bin/", "scripts/", "README.md", "LICENSE"],
   "scripts": {

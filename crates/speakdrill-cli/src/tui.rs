@@ -6,7 +6,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use myet_core::{
+use speakdrill_core::{
     fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport, LineScore,
     Progress, RunOptions, Vm,
 };
@@ -87,7 +87,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
     {
         let tx = tx.clone();
         rt.spawn(async move {
-            let cfg = myet_core::Config::load_or_default();
+            let cfg = speakdrill_core::Config::load_or_default();
             match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
                 Ok(cdp) => match fetch_catalog(&cdp, &cfg.server, &cfg.code, &cfg.content_type).await {
                     Ok(list) => {
@@ -102,7 +102,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
                     }
                 },
                 Err(e) => {
-                    let _ = tx.send(Ev::Fatal(format!("連不上 MyET：{e}")));
+                    let _ = tx.send(Ev::Fatal(format!("連不上 speakdrill：{e}")));
                 }
             }
         });
@@ -188,15 +188,15 @@ fn start_batch(
     app.status = format!("執行中（{} 課）", lessons.len());
 
     rt.spawn(async move {
-        let cfg = myet_core::Config::load_or_default();
+        let cfg = speakdrill_core::Config::load_or_default();
         let cdp = match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
             Ok(c) => c,
             Err(e) => {
-                let _ = tx.send(Ev::Fatal(format!("連不上 MyET：{e}")));
+                let _ = tx.send(Ev::Fatal(format!("連不上 speakdrill：{e}")));
                 return;
             }
         };
-        if let Err(e) = myet_core::ensure_logged_in(&cdp, &cfg.server).await {
+        if let Err(e) = speakdrill_core::ensure_logged_in(&cdp, &cfg.server).await {
             let _ = tx.send(Ev::Fatal(format!("{e}")));
             return;
         }
@@ -290,11 +290,11 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
         .split(f.area());
 
     let header = Paragraph::new(TLine::from(vec![
-        Span::styled(" myet ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(" speakdrill ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::raw(format!("  {} 課", app.lessons.len())),
         Span::raw(if app.running { "   ● 執行中" } else { "" }),
     ]))
-    .block(Block::default().borders(Borders::ALL).title("MyET 口說自動練習"));
+    .block(Block::default().borders(Borders::ALL).title("speakdrill 口說自動練習"));
     f.render_widget(header, chunks[0]);
 
     let body = Layout::default()

@@ -1,7 +1,7 @@
-//! myet-gui — 原生 egui 介面（無 webview）
+//! speakdrill-gui — 原生 egui 介面（無 webview）
 
 use anyhow::Result;
-use myet_core::{fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, Progress, RunOptions};
+use speakdrill_core::{fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, Progress, RunOptions};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -10,8 +10,8 @@ use std::sync::Arc;
 enum Ev {
     Catalog(Vec<LessonRef>),
     Log(String),
-    Line(myet_core::LineScore),
-    LessonDone(myet_core::LessonReport),
+    Line(speakdrill_core::LineScore),
+    LessonDone(speakdrill_core::LessonReport),
     Done,
     Fatal(String),
 }
@@ -25,7 +25,7 @@ impl Progress for ChannelProgress {
     fn log(&mut self, msg: &str) {
         let _ = self.tx.send(Ev::Log(msg.to_string()));
     }
-    fn line_done(&mut self, s: &myet_core::LineScore) {
+    fn line_done(&mut self, s: &speakdrill_core::LineScore) {
         let _ = self.tx.send(Ev::Line(s.clone()));
     }
     fn should_stop(&self) -> bool {
@@ -79,7 +79,7 @@ fn load_catalog(tx: Sender<Ev>, _stop: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
-            let cfg = myet_core::Config::load_or_default();
+            let cfg = speakdrill_core::Config::load_or_default();
             match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
                 Ok(cdp) => match fetch_catalog(&cdp, &cfg.server, &cfg.code, &cfg.content_type).await {
                     Ok(l) => { let _ = tx.send(Ev::Catalog(l)); }
@@ -95,13 +95,13 @@ fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<LessonRef>, pas
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
-            let mut cfg = myet_core::Config::load_or_default();
+            let mut cfg = speakdrill_core::Config::load_or_default();
             cfg.pass_score = pass;
             let cdp = match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
                 Ok(c) => c,
                 Err(e) => { let _ = tx.send(Ev::Fatal(format!("連不上 MyET：{e}"))); return; }
             };
-            if let Err(e) = myet_core::ensure_logged_in(&cdp, &cfg.server).await {
+            if let Err(e) = speakdrill_core::ensure_logged_in(&cdp, &cfg.server).await {
                 let _ = tx.send(Ev::Fatal(format!("{e}")));
                 return;
             }
@@ -224,7 +224,7 @@ fn main() -> Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "myet-gui",
+        "speakdrill-gui",
         opts,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )

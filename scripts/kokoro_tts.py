@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-kokoro_tts.py — 給 myet-practice 用的 TTS 轉接器
+kokoro_tts.py — 給 speakdrill 用的 TTS 轉接器
 
 用法：
     python kokoro_tts.py <文字檔> <輸出.wav>

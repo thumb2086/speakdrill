@@ -1790,51 +1790,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "myet-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "crossterm",
- "myet-core",
- "ratatui",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "myet-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cpal",
- "dirs",
- "futures-util",
- "hound",
- "libloading 0.8.9",
- "regex",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
- "windows 0.58.0",
-]
-
-[[package]]
-name = "myet-gui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "eframe",
- "egui",
- "myet-core",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "naga"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2769,6 +2724,51 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "speakdrill-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "speakdrill-core",
+ "tokio",
+]
+
+[[package]]
+name = "speakdrill-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cpal",
+ "dirs",
+ "futures-util",
+ "hound",
+ "libloading 0.8.9",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "windows 0.58.0",
+]
+
+[[package]]
+name = "speakdrill-gui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "eframe",
+ "egui",
+ "serde",
+ "serde_json",
+ "speakdrill-core",
+ "tokio",
 ]
 
 [[package]]
