@@ -174,6 +174,7 @@ pub fn install_vb_cable(log: &mut dyn FnMut(&str)) -> Result<()> {
     }
 
     log("接下來會跳出 UAC，請按「是」允許安裝音效驅動");
+    log("注意：安裝任何虛擬音效驅動後，建議重開機再執行 init/doctor");
     let ps = format!(
         "Start-Process -FilePath '{}' -ArgumentList '-i','-h' -Verb RunAs -Wait",
         setup.display()
@@ -186,6 +187,7 @@ pub fn install_vb_cable(log: &mut dyn FnMut(&str)) -> Result<()> {
     }
 
     log("等待裝置出現…");
+    log("若安裝後迴路仍不可用，請重開機後再跑一次 init");
     for _ in 0..30 {
         if detect_route().is_some() {
             log("完成：偵測到虛擬音效迴路");

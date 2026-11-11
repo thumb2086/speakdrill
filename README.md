@@ -97,6 +97,15 @@ Windows **沒有** user-mode 的方法可以建立麥克風，所以一定得裝
 speakdrill init --install-driver     # 沒偵測到裝置時，自動下載並安裝 VB-CABLE
 ```
 
+> ⚠ **虛擬音效驅動安裝後必須重開機。**
+>
+> VB-CABLE / VoiceMeeter 這類核心驅動不會在安裝瞬間完整生效。
+> 常見現象是：「裝置看得到，但 cpal 打不開」、或 App 錄音靜音。
+> 安裝後請直接重開機，再執行 `speakdrill doctor`。
+> `doctor` 會檢查「迴路能不能真的開、App 的 per-app 麥克風綁定正不正確」。
+> （Windows 26H2 + VB-Audio 驅動特別需要）
+
+
 > 安裝驅動需要管理員權限，過程中會跳一次 UAC，請按「是」。
 
 ### 唯一需要手動的一步

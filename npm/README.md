@@ -16,6 +16,15 @@ speakdrill doctor
 
 安裝時會從 GitHub Releases 下載原生二進位（`speakdrill.exe` / `speakdrill-gui.exe`）。
 
+
+## 重開機需求
+
+> 安裝／變更虛擬音效驅動後，**請重新開機**再跑 `speakdrill init`。
+> 只重啟 App 不夠。`doctor` 會檢查：
+> - 迴路能不能實際開啟
+> - App 的每應用程式麥克風綁定是否一致
+> - 是否選到真正可用的迴路
+
 ## 快速開始
 
 ```bash
