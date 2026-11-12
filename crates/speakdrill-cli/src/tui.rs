@@ -12,10 +12,10 @@ use speakdrill_core::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line as TLine, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
 use std::collections::HashSet;
@@ -52,6 +52,32 @@ impl Progress for ChannelProgress {
     }
 }
 
+/// 常見 CodeName 清單（可依需求增減）
+fn known_codenames() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("BKM_1A", "書林美語走天下-1A"),
+        ("BKM_1B", "書林美語走天下-1B"),
+        ("BKM_2A", "書林美語走天下-2A"),
+        ("BKM_2B", "書林美語走天下-2B"),
+        ("BKM_3A", "書林美語走天下-3A"),
+        ("BKM_3B", "書林美語走天下-3B"),
+        ("BKM_GAR_1A", "Getting Around in American English 1A"),
+        ("BKM_GAR_2A", "Getting Around in American English 2A"),
+        ("BKM_AME_1A", "American English 1A"),
+        ("BKM_MBA_SALES", "MBA 英語-銷售管理"),
+        ("BKM_MBA_PROD", "MBA 英語-生產管理"),
+        ("BKM_MBA_FIN", "MBA 英語-財務管理"),
+        ("BKM_MBA_HR", "MBA 英語-人資管理"),
+        ("BKM_MBA_MKT", "MBA 英語-行銷管理"),
+        ("BKM_MBA_RD", "MBA 英語-研發管理"),
+        ("BKM_MICE", "MICE 英語"),
+        ("BKM_TOEIC_1", "多益口說測驗攻略 Part 1"),
+        ("BKM_TOEIC_2", "多益口說測驗攻略 Part 2"),
+        ("BKM_TOEIC_3", "多益口說測驗攻略 Part 3"),
+        ("BKM_TOEIC_SP", "TOEIC Speaking"),
+    ]
+}
+
 struct App {
     lessons: Vec<(String, String)>,
     titles: Vec<String>,
@@ -66,9 +92,9 @@ struct App {
     status: String,
     /// 佇列（以 lesson_id 為鍵，reload 後仍然有效）
     queue: HashSet<String>,
-    /// CodeName 輸入模式
-    code_input_mode: bool,
-    code_input_buffer: String,
+    /// CodeName 選單模式
+    code_select_mode: bool,
+    code_select_idx: usize,
 }
 
 pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
@@ -88,8 +114,8 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         avg_n: 0,
         status: "載入目錄中…".into(),
         queue: HashSet::new(),
-        code_input_mode: false,
-        code_input_buffer: String::new(),
+        code_select_mode: false,
+        code_select_idx: 0,
     };
 
     // 背景載入目錄
@@ -132,36 +158,32 @@ fn event_loop(
                 if k.kind != KeyEventKind::Press {
                     continue;
                 }
-                if app.code_input_mode {
-                    // CodeName 輸入模式
+                if app.code_select_mode {
+                    // CodeName 下拉選單模式
+                    let codenames = known_codenames();
                     match k.code {
                         KeyCode::Esc => {
-                            app.code_input_mode = false;
-                            app.code_input_buffer.clear();
-                            app.status = format!("{} 課（Enter 跑單一課程）  ↑/↓ 移動 · Space 勾佇列 · Enter 執行（選取）· b 全部 · c 切換課本 · q 離開", app.lessons.len());
+                            app.code_select_mode = false;
+                            app.code_select_idx = 0;
+                            app.status = format!("{} 課  ↑/↓ 移動 · Space 勾佇列 · Enter 執行 · b 全部 · c 切換課本 · q 離開", app.lessons.len());
                         }
                         KeyCode::Enter => {
-                            let new_code = app.code_input_buffer.trim().to_string();
-                            if !new_code.is_empty() {
-                                // 寫入設定檔
-                                let mut cfg = speakdrill_core::Config::load_or_default();
-                                cfg.code = new_code.clone();
-                                cfg.save().ok();
-                                app.logs.push(format!("已切換 CodeName：{}，重新載入目錄…", new_code));
-                                app.code_input_mode = false;
-                                app.code_input_buffer.clear();
-                                spawn_catalog(rt, tx.clone(), true);
-                            } else {
-                                app.code_input_mode = false;
-                                app.code_input_buffer.clear();
-                                app.status = format!("{} 課（Enter 跑單一課程）  ↑/↓ 移動 · Space 勾佇列 · Enter 執行（選取）· b 全部 · c 切換課本 · q 離開", app.lessons.len());
+                            let (code, name) = codenames[app.code_select_idx];
+                            let mut cfg = speakdrill_core::Config::load_or_default();
+                            cfg.code = code.to_string();
+                            cfg.save().ok();
+                            app.logs.push(format!("已切換課本：{}（{}），重新載入目錄…", name, code));
+                            app.code_select_mode = false;
+                            app.code_select_idx = 0;
+                            spawn_catalog(rt, tx.clone(), true);
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if app.code_select_idx + 1 < codenames.len() {
+                                app.code_select_idx += 1;
                             }
                         }
-                        KeyCode::Backspace => {
-                            app.code_input_buffer.pop();
-                        }
-                        KeyCode::Char(ch) => {
-                            app.code_input_buffer.push(ch);
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            app.code_select_idx = app.code_select_idx.saturating_sub(1);
                         }
                         _ => {}
                     }
@@ -207,10 +229,8 @@ fn event_loop(
                         }
                         KeyCode::Enter if !app.running && !app.lessons.is_empty() => {
                             let picked = if app.queue.is_empty() {
-                                // 沒勾佇列 → 跑目前選取的單一課程
                                 app.lessons.get(app.sel).cloned().into_iter().collect::<Vec<_>>()
                             } else {
-                                // 佇列有內容 → 按目錄順序跑佇列
                                 app.lessons
                                     .iter()
                                     .filter(|(l, _)| app.queue.contains(l))
@@ -227,11 +247,11 @@ fn event_loop(
                             let all = app.lessons.clone();
                             start_batch(app, rt, tx.clone(), stop.clone(), all);
                         }
-                        // CodeName 切換：c 進入輸入模式
+                        // CodeName 切換：c 開啟下拉選單
                         KeyCode::Char('c') if !app.running => {
-                            app.code_input_mode = true;
-                            app.code_input_buffer.clear();
-                            app.status = "輸入新 CodeName (Enter 確認, Esc 取消)：".into();
+                            app.code_select_mode = true;
+                            app.code_select_idx = 0;
+                            app.status = "選擇課本（↑/↓ 選擇，Enter 確認，Esc 取消）".into();
                         }
                         _ => {}
                     }
@@ -439,13 +459,60 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
         .wrap(Wrap { trim: true });
     f.render_widget(log, body[1]);
 
-    let footer_text = if app.code_input_mode {
-        format!("CodeName: {}_", app.code_input_buffer)
+    let footer_text = if app.code_select_mode {
+        format!("選擇課本（↑/↓ 選擇，Enter 確認，Esc 取消）")
     } else {
         app.status.clone()
     };
     let footer = Paragraph::new(footer_text)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(footer, chunks[2]);
+
+    // CodeName 下拉選單彈窗
+    if app.code_select_mode {
+        let codenames = known_codenames();
+        let items: Vec<ListItem> = codenames
+            .iter()
+            .enumerate()
+            .map(|(i, (code, name))| {
+                let style = if i == app.code_select_idx {
+                    Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(TLine::from(format!("{}  {}", code, name))).style(style)
+            })
+            .collect();
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title("選擇課本 (CodeName)"))
+            .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+        let mut st = ListState::default();
+        st.select(Some(app.code_select_idx));
+
+        // 計算彈窗區域（置中，寬 70%，高 80%）
+        let area = centered_rect(70, 80, f.area());
+        f.render_widget(Clear, area); // 清除背景
+        f.render_stateful_widget(list, area, &mut st);
+    }
+}
+
+/// 計算置中矩形（百分比寬高）
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
