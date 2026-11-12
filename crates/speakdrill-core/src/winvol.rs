@@ -113,3 +113,17 @@ pub fn find_endpoint_id(needle: &str, capture: bool) -> Option<String> {
     }
     None
 }
+
+/// 找出與 `needle` 相符的 endpoint ID（不區分 capture/render）。
+pub fn find_endpoint_id_any(needle: &str) -> Option<String> {
+    let needle_l = needle.to_lowercase();
+    [true, false].into_iter().find_map(|capture| {
+        enumerate(capture).ok()?.into_iter().find_map(|(dev, name)| {
+            if name.to_lowercase().contains(&needle_l) {
+                unsafe { dev.GetId().ok()?.to_string().ok() }
+            } else {
+                None
+            }
+        })
+    })
+}
