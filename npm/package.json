@@ -1,6 +1,6 @@
 {
   "name": "speakdrill",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "口說課程自動化練習：TTS 產生示範語音、逐句驅動課程演練、輸出分數報告（Rust，含 TUI / 原生 GUI）",
   "keywords": [
     "speaking",
@@ -43,4 +43,5 @@
     "x64"
   ]
 }
+
 
