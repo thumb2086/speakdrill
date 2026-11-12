@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -200,9 +200,24 @@ fn event_loop(
                             app.sel = app.sel.saturating_sub(1);
                         }
                         KeyCode::Char(' ') if !app.lessons.is_empty() => {
-                            let id = app.lessons[app.sel].0.clone();
-                            if !app.queue.insert(id.clone()) {
-                                app.queue.remove(&id);
+                            // 檢查是否按住 Shift
+                            if k.modifiers.contains(KeyModifiers::SHIFT) {
+                                // Shift+Space：把同一 course_id 的所有單元加入佇列
+                                let current_course = app.lessons[app.sel].1.clone();
+                                let count_before = app.queue.len();
+                                for (lesson_id, course_id) in &app.lessons {
+                                    if course_id == &current_course {
+                                        app.queue.insert(lesson_id.clone());
+                                    }
+                                }
+                                let added = app.queue.len() - count_before;
+                                app.logs.push(format!("已加入同課程 {} 個單元（course: {}）", added, current_course));
+                            } else {
+                                // 普通 Space：切換單一單元
+                                let id = app.lessons[app.sel].0.clone();
+                                if !app.queue.insert(id.clone()) {
+                                    app.queue.remove(&id);
+                                }
                             }
                         }
                         KeyCode::Char('x') if !app.queue.is_empty() => {
@@ -335,7 +350,7 @@ fn apply(app: &mut App, ev: Ev) {
             } else {
                 let queued = app.queue.len();
                 app.status = format!(
-                    "{} 課（{}）  ↑/↓ 移動 · Space 勾佇列 · Enter 執行（{}）· b 全部 · c 切換課本 · q 離開",
+                    "{} 課（{}）  ↑/↓ 移動 · Space 單選 · Shift+Space 整課程 · Enter 執行（{}）· b 全部 · c 切換課本 · q 離開",
                     app.lessons.len(),
                     if queued > 0 { format!("已勾 {queued} 課") } else { "Enter 跑單一課程".to_string() },
                     if queued > 0 { "佇列" } else { "選取" },
