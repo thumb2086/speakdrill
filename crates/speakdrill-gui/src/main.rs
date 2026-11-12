@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use speakdrill_core::{fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, Progress, RunOptions};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -48,6 +49,8 @@ struct App {
     avg_n: usize,
     pass: u32,
     setup_busy: bool,
+    /// 佇列（以 lesson_id 為鍵，catalog 重抓後仍然有效）
+    queue: HashSet<String>,
 }
 
 impl App {
@@ -76,6 +79,7 @@ impl App {
             avg_n: 0,
             pass: 80,
             setup_busy: false,
+            queue: HashSet::new(),
         };
         load_catalog(tx.clone(), stop);
         app
@@ -156,7 +160,10 @@ impl eframe::App for App {
             match ev {
                 Ev::Catalog(l) => {
                     self.logs.push(format!("目錄：{} 課", l.len()));
+                    let keep: HashSet<String> = l.iter().map(|x| x.lesson_id.clone()).collect();
+                    self.queue.retain(|id| keep.contains(id));
                     self.lessons = l;
+                    self.sel = self.sel.min(self.lessons.len().saturating_sub(1));
                     self.status = "已載入目錄".into();
                 }
                 Ev::Log(s) => self.logs.push(s),
@@ -199,6 +206,23 @@ impl eframe::App for App {
                         start_run(self.tx.clone(), self.stop.clone(), vec![l], self.pass);
                     }
                 }
+                let qn = self.queue.len();
+                if ui.add_enabled(!self.running && qn > 0, egui::Button::new(format!("▶ 跑佇列（{qn}）"))).clicked() {
+                    let picked: Vec<LessonRef> = self
+                        .lessons
+                        .iter()
+                        .filter(|l| self.queue.contains(&l.lesson_id))
+                        .cloned()
+                        .collect();
+                    if !picked.is_empty() {
+                        self.running = true;
+                        start_run(self.tx.clone(), self.stop.clone(), picked, self.pass);
+                    }
+                }
+                if ui.add_enabled(qn > 0, egui::Button::new("✖ 清佇列")).clicked() {
+                    self.queue.clear();
+                    self.logs.push("（已清空佇列）".into());
+                }
                 if ui.add_enabled(!self.running, egui::Button::new("▶▶ 跑全部")).clicked() {
                     self.running = true;
                     start_run(self.tx.clone(), self.stop.clone(), self.lessons.clone(), self.pass);
@@ -226,10 +250,20 @@ impl eframe::App for App {
             ui.label("課程");
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for (i, l) in self.lessons.iter().enumerate() {
-                    let label = l.label();
-                    if ui.selectable_label(i == self.sel, label).clicked() {
-                        self.sel = i;
-                    }
+                    let mut queued = self.queue.contains(&l.lesson_id);
+                    ui.horizontal(|ui| {
+                        if ui.checkbox(&mut queued, "").clicked() {
+                            if queued {
+                                self.queue.insert(l.lesson_id.clone());
+                            } else {
+                                self.queue.remove(&l.lesson_id);
+                            }
+                        }
+                        let label = l.label();
+                        if ui.selectable_label(i == self.sel, label).clicked() {
+                            self.sel = i;
+                        }
+                    });
                 }
             });
         });

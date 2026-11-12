@@ -133,7 +133,8 @@ speakdrill setup --force             # 即使已綁定也重設
 speakdrill setup --restart-settings  # 「設定」視窗卡死時，先關閉再重開並自動設定
 ```
 
-GUI 的頂端也有「🔧 自動設定音訊」按鈕，呼叫同一段程式。
+GUI 的頂端也有「🔧 自動設定音訊」按鈕與「▶ 跑佇列（N）」按鈕，呼叫同一段程式；左側課程清單有核取方塊可勾選加入佇列。
+終端機介面（TUI）：`Space` 勾/取消佇列（黃色 ●）、`Enter` 執行（有佇列就跑佇列，否則跑選取的單一課程）、`a` 全選/取消、`x` 清佇列、`b` 跑全部。
 注意：**目標 App 必須啟動過且用過麥克風**（Windows mixer 只列有 audio session 的 App）。
 手動 fallback：`ms-settings:apps-volume` → 找到目標 App（MyET 會顯示為 **English-Chinese-Japanese**）→ 展開 → 輸入裝置 → `CABLE Output (VB-Audio Virtual Cable)`。
 

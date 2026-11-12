@@ -18,6 +18,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
+use std::collections::HashSet;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -63,6 +64,8 @@ struct App {
     avg_sum: f64,
     avg_n: usize,
     status: String,
+    /// 佇列（以 lesson_id 為鍵，reload 後仍然有效）
+    queue: HashSet<String>,
 }
 
 pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
@@ -81,6 +84,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         avg_sum: 0.0,
         avg_n: 0,
         status: "載入目錄中…".into(),
+        queue: HashSet::new(),
     };
 
     // 背景載入目錄
@@ -133,6 +137,26 @@ fn event_loop(
                     KeyCode::Up | KeyCode::Char('k') => {
                         app.sel = app.sel.saturating_sub(1);
                     }
+                    KeyCode::Char(' ') if !app.lessons.is_empty() => {
+                        let id = app.lessons[app.sel].0.clone();
+                        if !app.queue.insert(id.clone()) {
+                            app.queue.remove(&id);
+                        }
+                    }
+                    KeyCode::Char('x') if !app.queue.is_empty() => {
+                        app.queue.clear();
+                        app.logs.push("（已清空佇列）".into());
+                    }
+                    KeyCode::Char('a') if !app.lessons.is_empty() => {
+                        let all: HashSet<String> = app.lessons.iter().map(|(l, _)| l.clone()).collect();
+                        if app.queue.len() == all.len() {
+                            app.queue.clear();
+                            app.logs.push("（取消全選）".into());
+                        } else {
+                            app.queue = all;
+                            app.logs.push("（已全選）".into());
+                        }
+                    }
                     KeyCode::Char('r') if !app.running => {
                         app.logs.push("… 重新載入目錄".into());
                         spawn_catalog(rt, tx.clone(), true);
@@ -142,8 +166,22 @@ fn event_loop(
                         app.logs.push("… 請求中止".into());
                     }
                     KeyCode::Enter if !app.running && !app.lessons.is_empty() => {
-                        let (lesson, course) = app.lessons[app.sel].clone();
-                        start_batch(app, rt, tx.clone(), stop.clone(), vec![(lesson, course)]);
+                        let picked = if app.queue.is_empty() {
+                            // 沒勾佇列 → 跑目前選取的單一課程
+                            app.lessons.get(app.sel).cloned().into_iter().collect::<Vec<_>>()
+                        } else {
+                            // 佇列有內容 → 按目錄順序跑佇列
+                            app.lessons
+                                .iter()
+                                .filter(|(l, _)| app.queue.contains(l))
+                                .cloned()
+                                .collect::<Vec<_>>()
+                        };
+                        if picked.is_empty() {
+                            app.logs.push("（佇列與目錄對不上，請按 r 重新載入）".into());
+                        } else {
+                            start_batch(app, rt, tx.clone(), stop.clone(), picked);
+                        }
                     }
                     KeyCode::Char('b') if !app.running && !app.lessons.is_empty() => {
                         let all = app.lessons.clone();
@@ -221,7 +259,21 @@ fn apply(app: &mut App, ev: Ev) {
         Ev::Catalog(list) => {
             app.titles = list.iter().map(|l| l.label()).collect();
             app.lessons = list.iter().map(|l| (l.lesson_id.clone(), l.course_id.clone())).collect();
-            app.status = format!("{} 課（Enter 跑選取、b 跑全部、q 離開）", app.lessons.len());
+            // 選取位置夾回有效範圍（reload 後目錄可能變小）
+            app.sel = app.sel.min(app.lessons.len().saturating_sub(1));
+            app.queue.retain(|id| app.lessons.iter().any(|(l, _)| l == id));
+            if app.lessons.is_empty() {
+                app.status = "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into();
+                app.logs.push("（目錄抓不到：先到 MyET 頁面確認已登入且顯示課程，再按 r）".into());
+            } else {
+                let queued = app.queue.len();
+                app.status = format!(
+                    "{} 課（{}）  ↑/↓ 移動 · Space 勾佇列 · Enter 執行（{}）· b 全部 · q 離開",
+                    app.lessons.len(),
+                    if queued > 0 { format!("已勾 {queued} 課") } else { "Enter 跑單一課程".to_string() },
+                    if queued > 0 { "佇列" } else { "選取" },
+                );
+            }
         }
         Ev::Log(s) => {
             app.logs.push(s);
@@ -305,11 +357,22 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
     let items: Vec<ListItem> = app
         .titles
         .iter()
-        .map(|t| ListItem::new(TLine::from(t.clone())))
+        .zip(app.lessons.iter())
+        .map(|(t, (id, _))| {
+            if app.queue.contains(id) {
+                ListItem::new(TLine::from(format!("● {t}")))
+                    .style(Style::default().fg(Color::Yellow))
+            } else {
+                ListItem::new(TLine::from(format!("  {t}")))
+            }
+        })
         .collect();
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("課程"))
-        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!("課程（已勾 {}）", app.queue.len())),
+    )
+    .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
     let mut st = ListState::default();
     st.select(Some(app.sel));
     f.render_stateful_widget(list, body[0], &mut st);
