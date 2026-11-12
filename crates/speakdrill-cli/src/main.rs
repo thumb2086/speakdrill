@@ -61,10 +61,23 @@ enum Cmd {
     /// 終端機介面
     Tui,
     /// 自動設定目標 App 的每應用程式麥克風；可加上 --set-output 同時設定輸出裝置
+    /// 流程：先讀 registry 確認 → COM API 直接設定 → 失敗則用 UI Automation 操作 Windows 設定
     Setup {
         /// 同時設定 App 的輸出裝置（例如 "Voicemeeter AUX Input"）
         #[arg(long)]
         set_output: Option<String>,
+        /// 只預覽要做的步驟，不實際寫入
+        #[arg(long)]
+        dry_run: bool,
+        /// 不使用 UI Automation（COM 失敗時直接顯示手動步驟）
+        #[arg(long)]
+        no_uia: bool,
+        /// 即使 registry 顯示已綁定，也重新套用設定
+        #[arg(long)]
+        force: bool,
+        /// 「設定」視窗沒有回應時，先關閉再重新開啟（僅限你明確想自動重開時使用）
+        #[arg(long)]
+        restart_settings: bool,
     },
 }
 
@@ -97,7 +110,9 @@ fn main() -> Result<()> {
         }
         Cmd::List { code, refresh } => rt.block_on(cmd_list(code, refresh)),
         Cmd::Tui => tui::run(rt),
-        Cmd::Setup { set_output } => rt.block_on(cmd_setup(set_output)),
+        Cmd::Setup { set_output, dry_run, no_uia, force, restart_settings } => {
+            rt.block_on(cmd_setup(set_output, dry_run, no_uia, force, restart_settings))
+        }
     }
 }
 
@@ -463,89 +478,16 @@ async fn cmd_reset(yes: bool) -> Result<()> {
 
 // ---------------- setup ----------------
 
-fn process_pids(name: &str) -> Vec<u32> {
-    let exe = if name.to_lowercase().ends_with(".exe") {
-        name.to_string()
-    } else {
-        format!("{name}.exe")
-    };
-    let Ok(out) = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("IMAGENAME eq {exe}"), "/FO", "CSV", "/NH"])
-        .output()
-    else {
-        return Vec::new();
-    };
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.split(',');
-            parts.next()?;
-            parts.next()?
-                .trim()
-                .trim_matches('"')
-                .parse::<u32>()
-                .ok()
-        })
-        .collect()
-}
-
-#[allow(unused_imports)]
-pub async fn cmd_setup(set_output: Option<String>) -> Result<()> {
-    let cfg = Config::load_or_default();
-    let route = speakdrill_core::devices::routes()
-        .into_iter()
-        .find(|r| r.play_device == cfg.play_device)
-        .ok_or_else(|| anyhow::anyhow!("目前設定的迴路不可用，請先跑 speakdrill init"))?;
-
-    println!("== speakdrill setup ==");
-    println!("麥克風：{} → {}", cfg.app_exe, route.mic_device);
-
-    let pids = process_pids(&cfg.app_exe);
-    if pids.is_empty() {
-        println!("⚠ 找不到 {} 的執行程序，請先啟動 MyET，再跑一次 setup", cfg.app_exe);
-        println!("（要讓程式自動設定，MyET 至少要有一個 audio session/程序）");
-        println!("已嘗試開啟 ms-settings:apps-volume，可手動確認輸入裝置：");
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "ms-settings:apps-volume"])
-            .status();
-        return Ok(());
-    }
-
-    println!("找到程序：{}", pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "));
-
-    for pid in &pids {
-        match speakdrill_core::per_app::configure(&route.mic_device, *pid, true) {
-            Ok(()) => println!("  ✓ pid {pid}：已設成 {}", route.mic_device),
-            Err(e) => println!("  ✗ pid {pid}：{e}"),
-        }
-    }
-
-    if let Some(out_name) = set_output {
-        println!("輸出：{out_name}");
-        for pid in &pids {
-            match speakdrill_core::per_app::configure(&out_name, *pid, false) {
-                Ok(()) => println!("  ✓ pid {pid}：已設成 {out_name}"),
-                Err(e) => println!("  ✗ pid {pid}：{e}"),
-            }
-        }
-    } else {
-        println!("（未變更輸出；要同時設定請加 --set-output \"Voicemeeter AUX Input\"）");
-    }
-
-    let Some(expected) = speakdrill_core::winvol::find_endpoint_id(&route.mic_device, true) else {
-        println!("\n⚠ 無法產生預期 endpoint id（doctor 可能會誤判）");
-        return Ok(());
-    };
-
-    match speakdrill_core::binding::app_mic_binding(&cfg.app_exe) {
-        Some(b) if b.any_matches(&expected) => {
-            println!("\n✓ 驗證成功：{} 的麥克風已綁定 {}", cfg.app_exe, route.mic_device)
-        }
-        Some(_) => println!("\n⚠ 已呼叫設定，但 registry 回讀仍不一致；請用 doctor 確認"),
-        None => println!("\n⚠ 讀不到 per-app 設定；請用 doctor 確認"),
-    }
-
-    Ok(())
+/// 綁定/修復 per-app 音訊：registry → COM → UIA，實作在 speakdrill-core::setup
+async fn cmd_setup(
+    set_output: Option<String>,
+    dry_run: bool,
+    no_uia: bool,
+    force: bool,
+    restart_settings: bool,
+) -> Result<()> {
+    let opts = speakdrill_core::setup::SetupOptions { set_output, dry_run, no_uia, force, restart_settings };
+    speakdrill_core::setup::run_setup(&opts, &mut |s| println!("{s}"))
 }
 
 // ---------------- list ----------------

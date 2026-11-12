@@ -13,6 +13,7 @@ enum Ev {
     Line(speakdrill_core::LineScore),
     LessonDone(speakdrill_core::LessonReport),
     Done,
+    SetupDone,
     Fatal(String),
 }
 
@@ -46,6 +47,7 @@ struct App {
     avg_sum: f64,
     avg_n: usize,
     pass: u32,
+    setup_busy: bool,
 }
 
 impl App {
@@ -73,6 +75,7 @@ impl App {
             avg_sum: 0.0,
             avg_n: 0,
             pass: 80,
+            setup_busy: false,
         };
         load_catalog(tx.clone(), stop);
         app
@@ -92,6 +95,21 @@ fn load_catalog(tx: Sender<Ev>, _stop: Arc<AtomicBool>) {
                 Err(e) => { let _ = tx.send(Ev::Fatal(format!("連不上 MyET：{e}"))); }
             }
         });
+    });
+}
+
+fn start_setup(tx: Sender<Ev>) {
+    std::thread::spawn(move || {
+        let tx_log = tx.clone();
+        let res = speakdrill_core::setup::run_setup(
+            &speakdrill_core::setup::SetupOptions::default(),
+            &mut |s| { let _ = tx_log.send(Ev::Log(s)); },
+        );
+        match res {
+            Ok(()) => { let _ = tx.send(Ev::Log("（設定流程結束）".into())); }
+            Err(e) => { let _ = tx.send(Ev::Fatal(format!("設定失敗：{e}"))); }
+        }
+        let _ = tx.send(Ev::SetupDone);
     });
 }
 
@@ -159,6 +177,10 @@ impl eframe::App for App {
                     let avg = if self.avg_n > 0 { self.avg_sum / self.avg_n as f64 } else { 0.0 };
                     self.status = format!("完成：{} 句，平均 {:.1}", self.done, avg);
                 }
+                Ev::SetupDone => {
+                    self.setup_busy = false;
+                    self.status = "音訊設定完成（詳見紀錄）".into();
+                }
                 Ev::Fatal(e) => {
                     self.running = false;
                     self.status = e.clone();
@@ -184,6 +206,15 @@ impl eframe::App for App {
                 if ui.add_enabled(self.running, egui::Button::new("■ 停止")).clicked() {
                     self.stop.store(true, Ordering::Relaxed);
                     self.logs.push("… 請求中止".into());
+                }
+                ui.separator();
+                if ui.add_enabled(!self.setup_busy, egui::Button::new("🔧 自動設定音訊")).clicked() {
+                    self.setup_busy = true;
+                    self.logs.push("== 自動設定 per-app 音訊 ==".into());
+                    start_setup(self.tx.clone());
+                }
+                if self.setup_busy {
+                    ui.spinner();
                 }
                 ui.separator();
                 ui.label("及格分");

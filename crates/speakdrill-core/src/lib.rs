@@ -9,6 +9,7 @@ pub mod lesson;
 pub mod per_app;
 pub mod pipeline;
 pub mod piper;
+pub mod setup;
 pub mod tts;
 pub mod vm;
 

@@ -27,15 +27,19 @@ speakdrill 把這個流程自動化：
 ## 架構
 
 ```
-TTS（Kokoro / Piper）──▶ Voicemeeter Input (VAIO strip)
-                              │  strip[VAIO].B1 = 1
-                              ▼
-                          B1 bus ──▶ 「Voicemeeter Out B1」錄音裝置
-                                            │
-                            課程 App 的 per-app 輸入裝置 ──▶ 評分引擎
+TTS（Piper）播放 ──▶ CABLE Input（播放裝置）
+                         │
+                         ▼
+              CABLE Output（麥克風錄音端）
+                         │
+                         ▼
+                  課程 App 的 per-app 麥克風 ──▶ 評分引擎
 ```
 
-**全域預設麥克風不會被改動**，只有指定的那支 App 會被指向 B1。
+（備選路線：VoiceMeeter — TTS ──▶ Voicemeeter Input ──▶ VAIO strip → B1 bus ──▶ Voicemeeter Out B1。
+需要 strip → B1 路由設定；VB-CABLE 裝得上就用 VB-CABLE。）
+
+**全域預設麥克風不會被改動**，只有指定的那支 App 會被指向虛擬迴路。
 
 ---
 
@@ -108,14 +112,30 @@ speakdrill init --install-driver     # 沒偵測到裝置時，自動下載並�
 
 > 安裝驅動需要管理員權限，過程中會跳一次 UAC，請按「是」。
 
-### 唯一需要手動的一步
+### 自動設定 per-app 麥克風（setup）
 
-Windows 只允許「用介面」設定 per-app 音訊裝置（登錄值裡有一組 Windows 產生的
-綁定 GUID，自己手寫無效）：
+Windows 不讓 App 用介面改自己的裝置（登錄值裡有一組 Windows 產生的綁定 GUID，自己手寫無效），
+而且只有 App 有 audio session 時 mixer 才會列出它。`speakdrill setup` 用三層策略解決：
 
-1. `Win + R` → `ms-settings:apps-volume`
-2. 找到目標 App（MyET 會顯示為 **English-Chinese-Japanese**）→ 展開
-3. **輸入裝置** → `Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO)`
+1. **讀 registry** 確認 App 的 per-app 麥克風已綁定 → 已綁定就直接結束（什麼都不動）。
+2. **COM API** `SetPersistedDefaultAudioEndpoint` 直接寫入 → 成功就 registry 驗證並結束。
+3. **UI Automation**：自動開啟「設定 → 系統 → 聲音 → 音量混合器」，
+   用「進程 PID → EntityItem」精確定位到目標 App 那一列，展開後選定裝置，
+   再讀回驗證；只操作該列、不用 SendKeys、不用座標點擊；
+   Settings 沒回應時直接提示，不硬卡 45 秒。
+
+```bash
+speakdrill setup                     # 自動設定麥克風（registry → COM → UIA）
+speakdrill setup --set-output "..."  # 同時設定輸出裝置（例如 Voicemeeter AUX Input）
+speakdrill setup --dry-run           # 只預覽會做什麼，不實際更改
+speakdrill setup --no-uia            # 不碰設定視窗（COM 失敗就印手動步驟）
+speakdrill setup --force             # 即使已綁定也重設
+speakdrill setup --restart-settings  # 「設定」視窗卡死時，先關閉再重開並自動設定
+```
+
+GUI 的頂端也有「🔧 自動設定音訊」按鈕，呼叫同一段程式。
+注意：**目標 App 必須啟動過且用過麥克風**（Windows mixer 只列有 audio session 的 App）。
+手動 fallback：`ms-settings:apps-volume` → 找到目標 App（MyET 會顯示為 **English-Chinese-Japanese**）→ 展開 → 輸入裝置 → `CABLE Output (VB-Audio Virtual Cable)`。
 
 ### 目標 App 要開 debug port
 
@@ -197,11 +217,11 @@ speakdrill reset --yes            # 連設定檔一起刪
 
 ```
 crates/
-  speakdrill-core/   CDP client、課程解析、音訊（cpal）、VoiceMeeter、TTS、流程
-  speakdrill-cli/    speakdrill（init / doctor / reset / run / batch / tui）
+  speakdrill-core/   CDP client、課程解析、音訊（cpal）、VoiceMeeter、TTS、per-app 音訊設定（COM + UIA）、流程
+  speakdrill-cli/    speakdrill（init / doctor / reset / run / batch / tui / setup）
   speakdrill-gui/    speakdrill-gui（egui，原生，無 webview）
 npm/                 npm 包裝器（下載 GitHub Releases 的原生二進位）
-scripts/             kokoro_tts.py（命令式 TTS 轉接器）
+scripts/             audio-uia.ps1（UIA 助手，隨 binary 發布）、kokoro_tts.py（開發用）
 ```
 
 ## 授權
