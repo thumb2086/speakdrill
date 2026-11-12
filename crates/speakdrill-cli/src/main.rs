@@ -316,26 +316,33 @@ async fn cmd_doctor() -> Result<()> {
             Some(r) => {
                 let expected = speakdrill_core::winvol::find_endpoint_id(&r.mic_device, true);
                 match speakdrill_core::binding::app_mic_binding(&cfg.app_exe) {
-                    Some(b) if b.mic_guid.as_deref() == expected.as_deref() => {
-                        println!("OK（{} 已綁定 {}）", cfg.app_exe, r.mic_device)
-                    }
                     Some(b) => {
-                        println!(
-                            "✗ {} 綁定的是 {}，但我們播到 {}",
-                            cfg.app_exe,
-                            b.mic_guid.unwrap_or_else(|| "(未知)".into()),
-                            r.mic_device
-                        );
-                        println!(
-                            "      修正：ms-settings:apps-volume → {} → 輸入裝置選「{}」",
-                            cfg.app_exe, r.mic_device
-                        );
-                        bad += 1;
+                        let ok = expected
+                            .as_deref()
+                            .map(|e| b.any_matches(e))
+                            .unwrap_or(false);
+                        if ok {
+                            println!("OK（{} 已綁定 {}）", cfg.app_exe, r.mic_device)
+                        } else {
+                            println!(
+                                "✗ {} 的 per-app 麥克風未綁定我們播到的迴路（{}）",
+                                cfg.app_exe,
+                                r.mic_device
+                            );
+                            if let Some(g) = b.best_guid() {
+                                println!("      目前綁定：{}", g);
+                            }
+                            println!(
+                                "      修正：ms-settings:apps-volume → {} → 輸入裝置選「{}」",
+                                cfg.app_exe, r.mic_device
+                            );
+                            bad += 1;
+                        }
                     }
                     None => {
                         println!("✗ 找不到 {} 的 per-app 設定", cfg.app_exe);
                         println!(
-                            "      請到 ms-settings:apps-volume 把它的輸入裝置設成「{}」",
+                            "      請到 ms-settings:apps-volume 把輸入裝置設成「{}」",
                             r.mic_device
                         );
                         bad += 1;
@@ -352,26 +359,53 @@ async fn cmd_doctor() -> Result<()> {
         Err(e) => { println!("✗ {e}"); bad += 1; }
     }
 
-    print!("[VoiceMeeter] … ");
-    match Vm::connect() {
-        Ok(vm) => println!("OK  {}", vm.kind()),
-        Err(e) => { println!("✗ {e}"); bad += 1; }
-    }
-
-    #[cfg(windows)]
-    {
-        print!("[裝置音量] … ");
-        match speakdrill_core::winvol::list_endpoints() {
-            Ok(list) => {
-                let b1 = list.iter().find(|(k, n, _)| k == "capture" && n.contains("Out B1"));
-                match b1 {
-                    Some((_, n, v)) => println!("{n} = {:.1}%{}", v * 100.0,
-                        if *v < 0.9 { "  ⚠ 太低，跑 speakdrill init" } else { "" }),
-                    None => { println!("找不到 Voicemeeter Out B1"); bad += 1; }
-                }
+    let active_route = speakdrill_core::devices::routes()
+        .into_iter()
+        .find(|r| r.play_device == cfg.play_device);
+    if let Some(r) = active_route.as_ref() {
+        if r.needs_vm {
+            print!("[VoiceMeeter] … ");
+            match Vm::connect() {
+                Ok(vm) => println!("OK  {}", vm.kind()),
+                Err(e) => { println!("✗ {e}"); bad += 1; }
             }
-            Err(e) => println!("✗ {e}"),
+        } else {
+            println!("[VoiceMeeter] … （此路線不需要 VoiceMeeter）");
         }
+
+        #[cfg(windows)]
+        {
+            print!("[裝置音量] … ");
+            match speakdrill_core::winvol::list_endpoints() {
+                Ok(list) => {
+                    let mic = list.iter().find(|(k, n, _)| {
+                        k == "capture" && n.to_lowercase().contains(&r.mic_device.to_lowercase())
+                    });
+                    let play = list.iter().find(|(k, n, _)| {
+                        k == "render" && n.to_lowercase().contains(&r.play_device.to_lowercase())
+                    });
+                    match (mic, play) {
+                        (Some((_, mn, mv)), Some((_, pn, pv))) => println!(
+                            "mic {} = {:.1}%, play {} = {:.1}%{}",
+                            mn,
+                            mv * 100.0,
+                            pn,
+                            pv * 100.0,
+                            if *mv < 0.9 || *pv < 0.9 {
+                                "  ⚠ 太低，請跑 speakdrill init"
+                            } else {
+                                ""
+                            }
+                        ),
+                        (None, _) => { println!("找不到麥克風「{}」", r.mic_device); bad += 1; }
+                        (_, None) => { println!("找不到播放裝置「{}」", r.play_device); bad += 1; }
+                    }
+                }
+                Err(e) => println!("✗ {e}"),
+            }
+        }
+    } else {
+        println!("[迴路檢查] … （沒有可供檢查的路由）");
     }
 
     print!("[TTS] … ");

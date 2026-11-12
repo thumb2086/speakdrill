@@ -433,11 +433,14 @@ pub fn check_app_binding(cfg: &Config, force: bool) -> Result<()> {
             ));
         };
 
-        match bind.mic_guid.as_deref() {
-            Some(g) if g.eq_ignore_ascii_case(&expected) => Ok(()),
-            other => {
-                println!("⚠ per-app 麥克風不一致");
-                println!("  App 目前聽：{}", other.unwrap_or("(未知)"));
+        if bind.any_matches(&expected) {
+            return Ok(());
+        }
+
+        match bind.best_guid().as_deref() {
+            Some(g) => {
+                println!("⚠ per-app 麥克風不一致（按 app 實際使用的 role 判定）");
+                println!("  App 目前聽：{}", g);
                 println!("  我們播到  ：{}", expected);
                 println!(
                     "  修正：ms-settings:apps-volume → {} → 輸入裝置選「{}」",
@@ -445,14 +448,24 @@ pub fn check_app_binding(cfg: &Config, force: bool) -> Result<()> {
                 );
                 if force {
                     println!("  （--force：仍繼續執行）");
-                    Ok(())
-                } else {
-                    Err(anyhow!(
-                        "per-app 麥克風指向錯的裝置，會全部低分（加 --force 可略過）"
-                    ))
+                    return Ok(());
                 }
+                return Err(anyhow!(
+                    "per-app 麥克風指向錯的裝置，會全部低分（加 --force 可略過）"
+                ));
+            }
+            None => {
+                println!("⚠ 讀不到 App 的 per-app 麥克風設定");
+                if force {
+                    println!("  （--force：仍繼續執行）");
+                    return Ok(());
+                }
+                return Err(anyhow!(
+                    "per-app 麥克風未設定或無法讀取（加 --force 可略過）"
+                ));
             }
         }
+
     }
 }
 
