@@ -66,6 +66,9 @@ struct App {
     status: String,
     /// 佇列（以 lesson_id 為鍵，reload 後仍然有效）
     queue: HashSet<String>,
+    /// CodeName 輸入模式
+    code_input_mode: bool,
+    code_input_buffer: String,
 }
 
 pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
@@ -85,6 +88,8 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         avg_n: 0,
         status: "載入目錄中…".into(),
         queue: HashSet::new(),
+        code_input_mode: false,
+        code_input_buffer: String::new(),
     };
 
     // 背景載入目錄
@@ -127,67 +132,109 @@ fn event_loop(
                 if k.kind != KeyEventKind::Press {
                     continue;
                 }
-                match k.code {
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if app.sel + 1 < app.lessons.len() {
-                            app.sel += 1;
+                if app.code_input_mode {
+                    // CodeName 輸入模式
+                    match k.code {
+                        KeyCode::Esc => {
+                            app.code_input_mode = false;
+                            app.code_input_buffer.clear();
+                            app.status = format!("{} 課（Enter 跑單一課程）  ↑/↓ 移動 · Space 勾佇列 · Enter 執行（選取）· b 全部 · c 切換課本 · q 離開", app.lessons.len());
                         }
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        app.sel = app.sel.saturating_sub(1);
-                    }
-                    KeyCode::Char(' ') if !app.lessons.is_empty() => {
-                        let id = app.lessons[app.sel].0.clone();
-                        if !app.queue.insert(id.clone()) {
-                            app.queue.remove(&id);
+                        KeyCode::Enter => {
+                            let new_code = app.code_input_buffer.trim().to_string();
+                            if !new_code.is_empty() {
+                                // 寫入設定檔
+                                let mut cfg = speakdrill_core::Config::load_or_default();
+                                cfg.code = new_code.clone();
+                                cfg.save().ok();
+                                app.logs.push(format!("已切換 CodeName：{}，重新載入目錄…", new_code));
+                                app.code_input_mode = false;
+                                app.code_input_buffer.clear();
+                                spawn_catalog(rt, tx.clone(), true);
+                            } else {
+                                app.code_input_mode = false;
+                                app.code_input_buffer.clear();
+                                app.status = format!("{} 課（Enter 跑單一課程）  ↑/↓ 移動 · Space 勾佇列 · Enter 執行（選取）· b 全部 · c 切換課本 · q 離開", app.lessons.len());
+                            }
                         }
+                        KeyCode::Backspace => {
+                            app.code_input_buffer.pop();
+                        }
+                        KeyCode::Char(ch) => {
+                            app.code_input_buffer.push(ch);
+                        }
+                        _ => {}
                     }
-                    KeyCode::Char('x') if !app.queue.is_empty() => {
-                        app.queue.clear();
-                        app.logs.push("（已清空佇列）".into());
-                    }
-                    KeyCode::Char('a') if !app.lessons.is_empty() => {
-                        let all: HashSet<String> = app.lessons.iter().map(|(l, _)| l.clone()).collect();
-                        if app.queue.len() == all.len() {
+                } else {
+                    // 正常操作模式
+                    match k.code {
+                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if app.sel + 1 < app.lessons.len() {
+                                app.sel += 1;
+                            }
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            app.sel = app.sel.saturating_sub(1);
+                        }
+                        KeyCode::Char(' ') if !app.lessons.is_empty() => {
+                            let id = app.lessons[app.sel].0.clone();
+                            if !app.queue.insert(id.clone()) {
+                                app.queue.remove(&id);
+                            }
+                        }
+                        KeyCode::Char('x') if !app.queue.is_empty() => {
                             app.queue.clear();
-                            app.logs.push("（取消全選）".into());
-                        } else {
-                            app.queue = all;
-                            app.logs.push("（已全選）".into());
+                            app.logs.push("（已清空佇列）".into());
                         }
-                    }
-                    KeyCode::Char('r') if !app.running => {
-                        app.logs.push("… 重新載入目錄".into());
-                        spawn_catalog(rt, tx.clone(), true);
-                    }
-                    KeyCode::Char('s') => {
-                        stop.store(true, Ordering::Relaxed);
-                        app.logs.push("… 請求中止".into());
-                    }
-                    KeyCode::Enter if !app.running && !app.lessons.is_empty() => {
-                        let picked = if app.queue.is_empty() {
-                            // 沒勾佇列 → 跑目前選取的單一課程
-                            app.lessons.get(app.sel).cloned().into_iter().collect::<Vec<_>>()
-                        } else {
-                            // 佇列有內容 → 按目錄順序跑佇列
-                            app.lessons
-                                .iter()
-                                .filter(|(l, _)| app.queue.contains(l))
-                                .cloned()
-                                .collect::<Vec<_>>()
-                        };
-                        if picked.is_empty() {
-                            app.logs.push("（佇列與目錄對不上，請按 r 重新載入）".into());
-                        } else {
-                            start_batch(app, rt, tx.clone(), stop.clone(), picked);
+                        KeyCode::Char('a') if !app.lessons.is_empty() => {
+                            let all: HashSet<String> = app.lessons.iter().map(|(l, _)| l.clone()).collect();
+                            if app.queue.len() == all.len() {
+                                app.queue.clear();
+                                app.logs.push("（取消全選）".into());
+                            } else {
+                                app.queue = all;
+                                app.logs.push("（已全選）".into());
+                            }
                         }
+                        KeyCode::Char('r') if !app.running => {
+                            app.logs.push("… 重新載入目錄".into());
+                            spawn_catalog(rt, tx.clone(), true);
+                        }
+                        KeyCode::Char('s') => {
+                            stop.store(true, Ordering::Relaxed);
+                            app.logs.push("… 請求中止".into());
+                        }
+                        KeyCode::Enter if !app.running && !app.lessons.is_empty() => {
+                            let picked = if app.queue.is_empty() {
+                                // 沒勾佇列 → 跑目前選取的單一課程
+                                app.lessons.get(app.sel).cloned().into_iter().collect::<Vec<_>>()
+                            } else {
+                                // 佇列有內容 → 按目錄順序跑佇列
+                                app.lessons
+                                    .iter()
+                                    .filter(|(l, _)| app.queue.contains(l))
+                                    .cloned()
+                                    .collect::<Vec<_>>()
+                            };
+                            if picked.is_empty() {
+                                app.logs.push("（佇列與目錄對不上，請按 r 重新載入）".into());
+                            } else {
+                                start_batch(app, rt, tx.clone(), stop.clone(), picked);
+                            }
+                        }
+                        KeyCode::Char('b') if !app.running && !app.lessons.is_empty() => {
+                            let all = app.lessons.clone();
+                            start_batch(app, rt, tx.clone(), stop.clone(), all);
+                        }
+                        // CodeName 切換：c 進入輸入模式
+                        KeyCode::Char('c') if !app.running => {
+                            app.code_input_mode = true;
+                            app.code_input_buffer.clear();
+                            app.status = "輸入新 CodeName (Enter 確認, Esc 取消)：".into();
+                        }
+                        _ => {}
                     }
-                    KeyCode::Char('b') if !app.running && !app.lessons.is_empty() => {
-                        let all = app.lessons.clone();
-                        start_batch(app, rt, tx.clone(), stop.clone(), all);
-                    }
-                    _ => {}
                 }
             }
         }
@@ -268,7 +315,7 @@ fn apply(app: &mut App, ev: Ev) {
             } else {
                 let queued = app.queue.len();
                 app.status = format!(
-                    "{} 課（{}）  ↑/↓ 移動 · Space 勾佇列 · Enter 執行（{}）· b 全部 · q 離開",
+                    "{} 課（{}）  ↑/↓ 移動 · Space 勾佇列 · Enter 執行（{}）· b 全部 · c 切換課本 · q 離開",
                     app.lessons.len(),
                     if queued > 0 { format!("已勾 {queued} 課") } else { "Enter 跑單一課程".to_string() },
                     if queued > 0 { "佇列" } else { "選取" },
@@ -392,7 +439,12 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
         .wrap(Wrap { trim: true });
     f.render_widget(log, body[1]);
 
-    let footer = Paragraph::new(app.status.clone())
+    let footer_text = if app.code_input_mode {
+        format!("CodeName: {}_", app.code_input_buffer)
+    } else {
+        app.status.clone()
+    };
+    let footer = Paragraph::new(footer_text)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(footer, chunks[2]);
 }
