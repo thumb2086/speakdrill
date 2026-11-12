@@ -6,10 +6,12 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+
 use speakdrill_core::{
     fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport, LineScore,
     Progress, RunOptions, Vm,
 };
+
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -18,6 +20,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
+
 use std::collections::HashSet;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -52,6 +55,43 @@ impl Progress for ChannelProgress {
     }
 }
 
+/// 產生正常模式下的 status 字串
+fn build_status(app: &App) -> String {
+    let queued = app.queue.len();
+    if app.lessons.is_empty() {
+        "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into()
+    } else {
+        format!(
+            "{} 課（{}）  ↑/↓ 移動 · Space 單選 · Shift+Space 整課程 · Enter 執行（{}）· b 全部 · c 切換課本 · q 離開",
+            app.lessons.len(),
+            if queued > 0 { format!("已勾 {queued} 課") } else { "Enter 跑單一課程".to_string() },
+            if queued > 0 { "佇列" } else { "選取" },
+        )
+    }
+}
+
+/// 互動式 App 狀態
+struct App {
+    lessons: Vec<(String, String)>,
+    titles: Vec<String>,
+    sel: usize,
+    logs: Vec<String>,
+    running: bool,
+    stop: Arc<AtomicBool>,
+    tx: UnboundedSender<Ev>,
+    total_done: usize,
+    avg_sum: f64,
+    avg_n: usize,
+    status: String,
+    /// 佇列（以 lesson_id 為鍵，reload 後仍然有效）
+    queue: HashSet<String>,
+    /// CodeName 選單模式
+    code_select_mode: bool,
+    code_select_idx: usize,
+    /// 儲存開啟 CodeName 選單前的 status，關閉時恢復
+    prev_status: String,
+}
+
 /// 常見 CodeName 清單（可依需求增減）
 fn known_codenames() -> Vec<(&'static str, &'static str)> {
     vec![
@@ -77,26 +117,6 @@ fn known_codenames() -> Vec<(&'static str, &'static str)> {
         ("BKM_TOEIC_SP", "TOEIC Speaking"),
     ]
 }
-
-struct App {
-    lessons: Vec<(String, String)>,
-    titles: Vec<String>,
-    sel: usize,
-    logs: Vec<String>,
-    running: bool,
-    stop: Arc<AtomicBool>,
-    tx: UnboundedSender<Ev>,
-    total_done: usize,
-    avg_sum: f64,
-    avg_n: usize,
-    status: String,
-    /// 佇列（以 lesson_id 為鍵，reload 後仍然有效）
-    queue: HashSet<String>,
-    /// CodeName 選單模式
-    code_select_mode: bool,
-    code_select_idx: usize,
-}
-
 pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
     let (tx, rx) = unbounded_channel::<Ev>();
     let stop = Arc::new(AtomicBool::new(false));
@@ -116,6 +136,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         queue: HashSet::new(),
         code_select_mode: false,
         code_select_idx: 0,
+        prev_status: String::new(),
     };
 
     // 背景載入目錄
@@ -136,7 +157,6 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
     term.show_cursor()?;
     res
 }
-
 fn event_loop(
     term: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
@@ -145,7 +165,7 @@ fn event_loop(
     tx: UnboundedSender<Ev>,
     stop: Arc<AtomicBool>,
 ) -> Result<()> {
-        loop {
+    loop {
         // 收事件
         while let Ok(ev) = rx.try_recv() {
             apply(app, ev);
@@ -161,25 +181,41 @@ fn event_loop(
                 if app.code_select_mode {
                     // CodeName 下拉選單模式
                     let codenames = known_codenames();
+                    // 開啟選單時先 clamp idx，避免 reload 後陣列變小導致越界
+                    if app.code_select_idx >= codenames.len() {
+                        app.code_select_idx = codenames.len().saturating_sub(1);
+                    }
                     match k.code {
-                        KeyCode::Esc => {
+                        KeyCode::Esc | KeyCode::Char('c') => {
+                            // 恢復之前的 status
                             app.code_select_mode = false;
                             app.code_select_idx = 0;
-                            app.status = format!("{} 課  ↑/↓ 移動 · Space 勾佇列 · Enter 執行 · b 全部 · c 切換課本 · q 離開", app.lessons.len());
+                            app.status = std::mem::take(&mut app.prev_status);
+                            if app.status.is_empty() {
+                                app.status = build_status(app);
+                            }
                         }
                         KeyCode::Enter => {
-                            let (code, name) = codenames[app.code_select_idx];
+                            let idx = app.code_select_idx.min(codenames.len().saturating_sub(1));
+                            let (code, name) = codenames[idx];
                             let mut cfg = speakdrill_core::Config::load_or_default();
                             cfg.code = code.to_string();
                             cfg.save().ok();
                             app.logs.push(format!("已切換課本：{}（{}），重新載入目錄…", name, code));
                             app.code_select_mode = false;
                             app.code_select_idx = 0;
+                            app.status = std::mem::take(&mut app.prev_status);
+                            if app.status.is_empty() {
+                                app.status = build_status(app);
+                            }
                             spawn_catalog(rt, tx.clone(), true);
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
-                            if app.code_select_idx + 1 < codenames.len() {
-                                app.code_select_idx += 1;
+                            // 使用 checked_add 避免溢位
+                            if let Some(next) = app.code_select_idx.checked_add(1) {
+                                if next < codenames.len() {
+                                    app.code_select_idx = next;
+                                }
                             }
                         }
                         KeyCode::Up | KeyCode::Char('k') => {
@@ -222,25 +258,25 @@ fn event_loop(
                         }
                         KeyCode::Char('x') if !app.queue.is_empty() => {
                             app.queue.clear();
-                            app.logs.push("（已清空佇列）".into());
+                            app.logs.push("(已清空佇列)".into());
                         }
                         KeyCode::Char('a') if !app.lessons.is_empty() => {
                             let all: HashSet<String> = app.lessons.iter().map(|(l, _)| l.clone()).collect();
                             if app.queue.len() == all.len() {
                                 app.queue.clear();
-                                app.logs.push("（取消全選）".into());
+                                app.logs.push("(取消全選)".into());
                             } else {
                                 app.queue = all;
-                                app.logs.push("（已全選）".into());
+                                app.logs.push("(已全選)".into());
                             }
                         }
                         KeyCode::Char('r') if !app.running => {
-                            app.logs.push("… 重新載入目錄".into());
+                            app.logs.push("... 重新載入目錄".into());
                             spawn_catalog(rt, tx.clone(), true);
                         }
                         KeyCode::Char('s') => {
                             stop.store(true, Ordering::Relaxed);
-                            app.logs.push("… 請求中止".into());
+                            app.logs.push("... 請求中止".into());
                         }
                         KeyCode::Enter if !app.running && !app.lessons.is_empty() => {
                             let picked = if app.queue.is_empty() {
@@ -253,7 +289,7 @@ fn event_loop(
                                     .collect::<Vec<_>>()
                             };
                             if picked.is_empty() {
-                                app.logs.push("（佇列與目錄對不上，請按 r 重新載入）".into());
+                                app.logs.push("(佇列與目錄對不上，請按 r 重新載入)".into());
                             } else {
                                 start_batch(app, rt, tx.clone(), stop.clone(), picked);
                             }
@@ -264,6 +300,8 @@ fn event_loop(
                         }
                         // CodeName 切換：c 開啟下拉選單
                         KeyCode::Char('c') if !app.running => {
+                            // 儲存目前 status，以便關閉選單時恢復
+                            app.prev_status = std::mem::take(&mut app.status);
                             app.code_select_mode = true;
                             app.code_select_idx = 0;
                             app.status = "選擇課本（↑/↓ 選擇，Enter 確認，Esc 取消）".into();
@@ -275,7 +313,6 @@ fn event_loop(
         }
     }
 }
-
 fn start_batch(
     app: &mut App,
     rt: &tokio::runtime::Runtime,
@@ -335,7 +372,6 @@ fn start_batch(
         let _ = tx.send(Ev::BatchDone);
     });
 }
-
 fn apply(app: &mut App, ev: Ev) {
     match ev {
         Ev::Catalog(list) => {
@@ -344,17 +380,9 @@ fn apply(app: &mut App, ev: Ev) {
             // 選取位置夾回有效範圍（reload 後目錄可能變小）
             app.sel = app.sel.min(app.lessons.len().saturating_sub(1));
             app.queue.retain(|id| app.lessons.iter().any(|(l, _)| l == id));
-            if app.lessons.is_empty() {
-                app.status = "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into();
-                app.logs.push("（目錄抓不到：先到 MyET 頁面確認已登入且顯示課程，再按 r）".into());
-            } else {
-                let queued = app.queue.len();
-                app.status = format!(
-                    "{} 課（{}）  ↑/↓ 移動 · Space 單選 · Shift+Space 整課程 · Enter 執行（{}）· b 全部 · c 切換課本 · q 離開",
-                    app.lessons.len(),
-                    if queued > 0 { format!("已勾 {queued} 課") } else { "Enter 跑單一課程".to_string() },
-                    if queued > 0 { "佇列" } else { "選取" },
-                );
+            // 更新 status（若不在 code_select_mode 才更新）
+            if !app.code_select_mode {
+                app.status = build_status(app);
             }
         }
         Ev::Log(s) => {
@@ -391,7 +419,6 @@ fn apply(app: &mut App, ev: Ev) {
         }
     }
 }
-
 fn spawn_catalog(rt: &tokio::runtime::Runtime, tx: UnboundedSender<Ev>, refresh: bool) {
     rt.spawn(async move {
         let cfg = speakdrill_core::Config::load_or_default();
@@ -414,7 +441,6 @@ fn spawn_catalog(rt: &tokio::runtime::Runtime, tx: UnboundedSender<Ev>, refresh:
         }
     });
 }
-
 fn draw(f: &mut ratatui::Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -475,7 +501,7 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
     f.render_widget(log, body[1]);
 
     let footer_text = if app.code_select_mode {
-        format!("選擇課本（↑/↓ 選擇，Enter 確認，Esc 取消）")
+        format!("選擇課本（↑/↓ 選擇，Enter 確認，Esc 取消)")
     } else {
         app.status.clone()
     };
@@ -486,11 +512,13 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
     // CodeName 下拉選單彈窗
     if app.code_select_mode {
         let codenames = known_codenames();
+        // 渲染前再 clamp 一次，確保 index 有效
+        let clamped_idx = app.code_select_idx.min(codenames.len().saturating_sub(1));
         let items: Vec<ListItem> = codenames
             .iter()
             .enumerate()
             .map(|(i, (code, name))| {
-                let style = if i == app.code_select_idx {
+                let style = if i == clamped_idx {
                     Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
@@ -502,7 +530,7 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
             .block(Block::default().borders(Borders::ALL).title("選擇課本 (CodeName)"))
             .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
         let mut st = ListState::default();
-        st.select(Some(app.code_select_idx));
+        st.select(Some(clamped_idx));
 
         // 計算彈窗區域（置中，寬 70%，高 80%）
         let area = centered_rect(70, 80, f.area());
@@ -510,7 +538,6 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
         f.render_stateful_widget(list, area, &mut st);
     }
 }
-
 /// 計算置中矩形（百分比寬高）
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
@@ -530,4 +557,3 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
-
