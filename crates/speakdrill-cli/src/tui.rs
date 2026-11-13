@@ -233,6 +233,8 @@ fn event_loop(
                     // 正常操作模式
                     match k.code {
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                        // Ctrl+C 也能退出
+                        KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return Ok(()),
                         KeyCode::Down | KeyCode::Char('j') => {
                             if app.sel + 1 < app.lessons.len() {
                                 app.sel += 1;
@@ -279,6 +281,20 @@ fn event_loop(
                         KeyCode::Char('r') if !app.running => {
                             app.logs.push("... 重新載入目錄".into());
                             spawn_catalog(rt, tx.clone(), true);
+                        }
+                        // m 鍵：自動啟動 MyET 並加上 debug port
+                        KeyCode::Char('m') if !app.running => {
+                            app.logs.push("... 正在啟動 MyET (debug port 9222)".into());
+                            let myet_path = r"C:\Program Files (x86)\LLabs\MyET10\MyET10.exe";
+                            if std::path::Path::new(myet_path).exists() {
+                                std::process::Command::new(myet_path)
+                                    .args(["--remote-debugging-port=9222", "--remote-allow-origins=*"])
+                                    .spawn()
+                                    .map(|_| app.logs.push("MyET 已啟動，等待 CDP 連線...".into()))
+                                    .unwrap_or_else(|e| app.logs.push(format!("啟動 MyET 失敗：{}", e)));
+                            } else {
+                                app.logs.push("找不到 MyET 執行檔".into());
+                            }
                         }
                         KeyCode::Char('s') => {
                             stop.store(true, Ordering::Relaxed);
