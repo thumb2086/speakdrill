@@ -61,13 +61,13 @@ impl Progress for ChannelProgress {
 /// 產生正常模式下的 status 字串
 fn build_status(app: &App) -> String {
     let queued = app.queue.len();
-    if app.lessons.is_empty() {
+    if app.coursebooks.is_empty() {
         "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into()
     } else {
         format!(
-            "{} 課（{}）  ↑/↓ 移動 · Space 單選 · Shift+Space 整課程 · g 加入課本 · Enter 執行（{}）· b 全部 · c 切換課本 · q 離開",
-            app.lessons.len(),
-            if queued > 0 { format!("已勾 {queued} 課") } else { "Enter 跑單一課程".to_string() },
+            "{} 本課本（{}）  ↑/↓ 移動 · Space 選取 · Enter 執行（{}）· a 全選 · x 清空 · b 全部 · c 切換課本 · q 離開",
+            app.coursebooks.len(),
+            if queued > 0 { format!("已勾 {queued} 本") } else { "Enter 跑單一課本".to_string() },
             if queued > 0 { "佇列" } else { "選取" },
         )
     }
@@ -75,7 +75,12 @@ fn build_status(app: &App) -> String {
 
 /// 互動式 App 狀態
 struct App {
+    /// 所有課程（lesson_id, course_id）
     lessons: Vec<(String, String)>,
+    /// 課本清單：(CodeName, 顯示名稱, [lesson_id, course_id])
+    coursebooks: Vec<(String, String, Vec<(String, String)>)>,
+    /// 佇列：課本索引
+    queue: HashSet<usize>,
     titles: Vec<String>,
     sel: usize,
     logs: Vec<String>,
@@ -86,12 +91,9 @@ struct App {
     avg_sum: f64,
     avg_n: usize,
     status: String,
-    /// 佇列（以 lesson_id 為鍵，reload 後仍然有效）
-    queue: HashSet<String>,
     /// CodeName 選單模式
     code_select_mode: bool,
     code_select_idx: usize,
-    /// CodeName 多選模式下的已選索引
     code_select_selected: HashSet<usize>,
     /// 儲存開啟 CodeName 選單前的 status，關閉時恢復
     prev_status: String,
@@ -128,6 +130,8 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
 
     let mut app = App {
         lessons: Vec::new(),
+        coursebooks: Vec::new(),
+        queue: HashSet::new(),
         titles: Vec::new(),
         sel: 0,
         logs: Vec::new(),
@@ -138,7 +142,6 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         avg_sum: 0.0,
         avg_n: 0,
         status: "載入目錄中…".into(),
-        queue: HashSet::new(),
         code_select_mode: false,
         code_select_idx: 0,
         code_select_selected: HashSet::new(),
@@ -262,11 +265,10 @@ fn event_loop(
                                 for &idx in &selected {
                                     if idx != first_idx {
                                         let (code, _name) = codenames[idx];
-                                        let prefix = code.replace('_', "-B").replace("BKM-B", "BKM-B") + "-";
-                                        for (lesson_id, course_id) in &app.lessons {
-                                            if course_id.starts_with(&prefix) {
-                                                app.queue.insert(lesson_id.clone());
-                                            }
+                                        // 找到對應的課本索引
+                                        let cb_prefix = code.replace('_', "-B").replace("BKM-B", "BKM-B");
+                                        if let Some(cb_idx) = app.coursebooks.iter().position(|(c, _, _)| c == &cb_prefix) {
+                                            app.queue.insert(cb_idx);
                                         }
                                     }
                                 }
@@ -307,33 +309,20 @@ fn event_loop(
                         KeyCode::Up | KeyCode::Char('k') => {
                             app.sel = app.sel.saturating_sub(1);
                         }
-                        KeyCode::Char(' ') if !app.lessons.is_empty() => {
-                            // 檢查是否按住 Shift
-                            if k.modifiers.contains(KeyModifiers::SHIFT) {
-                                // Shift+Space：把同一 course_id 的所有單元加入佇列
-                                let current_course = app.lessons[app.sel].1.clone();
-                                let count_before = app.queue.len();
-                                for (lesson_id, course_id) in &app.lessons {
-                                    if course_id == &current_course {
-                                        app.queue.insert(lesson_id.clone());
-                                    }
-                                }
-                                let added = app.queue.len() - count_before;
-                                app.logs.push(format!("已加入同課程 {} 個單元（course: {}）", added, current_course));
+                        KeyCode::Char(' ') if !app.coursebooks.is_empty() => {
+                            // Space：切換課本選取
+                            if app.queue.contains(&app.sel) {
+                                app.queue.remove(&app.sel);
                             } else {
-                                // 普通 Space：切換單一單元
-                                let id = app.lessons[app.sel].0.clone();
-                                if !app.queue.insert(id.clone()) {
-                                    app.queue.remove(&id);
-                                }
+                                app.queue.insert(app.sel);
                             }
                         }
                         KeyCode::Char('x') if !app.queue.is_empty() => {
                             app.queue.clear();
                             app.logs.push("(已清空佇列)".into());
                         }
-                        KeyCode::Char('a') if !app.lessons.is_empty() => {
-                            let all: HashSet<String> = app.lessons.iter().map(|(l, _)| l.clone()).collect();
+                        KeyCode::Char('a') if !app.coursebooks.is_empty() => {
+                            let all: HashSet<usize> = (0..app.coursebooks.len()).collect();
                             if app.queue.len() == all.len() {
                                 app.queue.clear();
                                 app.logs.push("(取消全選)".into());
@@ -365,16 +354,19 @@ fn event_loop(
                             stop.store(true, Ordering::Relaxed);
                             app.logs.push("... 請求中止".into());
                         }
-                        KeyCode::Enter if !app.running && !app.lessons.is_empty() => {
-                            let picked = if app.queue.is_empty() {
-                                app.lessons.get(app.sel).cloned().into_iter().collect::<Vec<_>>()
+                        KeyCode::Enter if !app.running && !app.coursebooks.is_empty() => {
+                            // 把選中的課本展開為 lessons
+                            let mut picked = Vec::new();
+                            let selected: Vec<usize> = if app.queue.is_empty() {
+                                vec![app.sel]
                             } else {
-                                app.lessons
-                                    .iter()
-                                    .filter(|(l, _)| app.queue.contains(l))
-                                    .cloned()
-                                    .collect::<Vec<_>>()
+                                app.queue.iter().copied().collect()
                             };
+                            for &idx in &selected {
+                                if let Some((_, _, lessons)) = app.coursebooks.get(idx) {
+                                    picked.extend(lessons.clone());
+                                }
+                            }
                             if picked.is_empty() {
                                 app.logs.push("(佇列與目錄對不上，請按 r 重新載入)".into());
                             } else {
@@ -392,21 +384,6 @@ fn event_loop(
                             app.code_select_mode = true;
                             app.code_select_idx = 0;
                             app.status = "選擇課本（↑/↓ 選擇，Enter 確認，Esc 取消）".into();
-                        }
-                        // g 鍵：把目前課本（CodeName）的所有單元加入佇列
-                        KeyCode::Char('g') if !app.running && !app.lessons.is_empty() => {
-                            let cfg = speakdrill_core::Config::load_or_default();
-                            let code = &cfg.code;
-                            // CodeName 格式：BKM_1A -> course_id 前綴：BKM-B1A-
-                            let prefix = code.replace('_', "-B").replace("BKM-B", "BKM-B") + "-";
-                            let count_before = app.queue.len();
-                            for (lesson_id, course_id) in &app.lessons {
-                                if course_id.starts_with(&prefix) {
-                                    app.queue.insert(lesson_id.clone());
-                                }
-                            }
-                            let added = app.queue.len() - count_before;
-                            app.logs.push(format!("已加入課本 {} 共 {} 個單元（course_id 前綴：{}）", code, added, prefix));
                         }
                         _ => {}
                     }
@@ -484,12 +461,34 @@ fn apply(app: &mut App, ev: Ev) {
     match ev {
         Ev::Catalog(list) => {
             app.logs.push(format!("目錄載入：{} 課", list.len()));
-            app.titles = list.iter().map(|l| l.label()).collect();
             app.lessons = list.iter().map(|l| (l.lesson_id.clone(), l.course_id.clone())).collect();
-            // 選取位置夾回有效範圍（reload 後目錄可能變小）
-            app.sel = app.sel.min(app.lessons.len().saturating_sub(1));
-            app.queue.retain(|id| app.lessons.iter().any(|(l, _)| l == id));
-            // 更新 status（若不在 code_select_mode 才更新）
+            // 按 course_id 前綴分組為課本
+            app.coursebooks.clear();
+            for l in &list {
+                let parts: Vec<&str> = l.course_id.split('-').collect();
+                let cb_key = if parts.len() >= 2 {
+                    format!("{}-{}", parts[0], parts[1])
+                } else {
+                    l.course_id.clone()
+                };
+                let cb_name = speakdrill_core::config::KNOWN_CODENAMES
+                    .iter()
+                    .find(|(code, _)| code.replace('_', "-B") == cb_key)
+                    .map(|(_, name)| name.to_string())
+                    .unwrap_or_else(|| cb_key.clone());
+                if let Some(cb) = app.coursebooks.iter_mut().find(|(c, _, _)| c == &cb_key) {
+                    if !cb.2.iter().any(|(id, _)| id == &l.lesson_id) {
+                        cb.2.push((l.lesson_id.clone(), l.course_id.clone()));
+                    }
+                } else {
+                    app.coursebooks.push((cb_key, cb_name, vec![(l.lesson_id.clone(), l.course_id.clone())]));
+                }
+            }
+            // 重新計算 queue（保留已選的課本索引）
+            app.queue.retain(|&i| i < app.coursebooks.len());
+            // 選取位置夾回有效範圍
+            app.sel = app.sel.min(app.coursebooks.len().saturating_sub(1));
+            // 更新 status
             if !app.code_select_mode {
                 app.status = build_status(app);
             }
@@ -497,13 +496,30 @@ fn apply(app: &mut App, ev: Ev) {
         Ev::CatalogAppend(list) => {
             app.logs.push(format!("+{} 課", list.len()));
             for l in &list {
+                let parts: Vec<&str> = l.course_id.split('-').collect();
+                let cb_key = if parts.len() >= 2 {
+                    format!("{}-{}", parts[0], parts[1])
+                } else {
+                    l.course_id.clone()
+                };
+                let cb_name = speakdrill_core::config::KNOWN_CODENAMES
+                    .iter()
+                    .find(|(code, _)| code.replace('_', "-B") == cb_key)
+                    .map(|(_, name)| name.to_string())
+                    .unwrap_or_else(|| cb_key.clone());
+                if let Some(cb) = app.coursebooks.iter_mut().find(|(c, _, _)| c == &cb_key) {
+                    if !cb.2.iter().any(|(id, _)| id == &l.lesson_id) {
+                        cb.2.push((l.lesson_id.clone(), l.course_id.clone()));
+                    }
+                } else {
+                    app.coursebooks.push((cb_key, cb_name, vec![(l.lesson_id.clone(), l.course_id.clone())]));
+                }
                 if !app.lessons.iter().any(|(id, _)| id == &l.lesson_id) {
-                    app.titles.push(l.label());
                     app.lessons.push((l.lesson_id.clone(), l.course_id.clone()));
                 }
             }
-            app.sel = app.sel.min(app.lessons.len().saturating_sub(1));
-            app.queue.retain(|id| app.lessons.iter().any(|(l, _)| l == id));
+            app.sel = app.sel.min(app.coursebooks.len().saturating_sub(1));
+            app.queue.retain(|&i| i < app.coursebooks.len());
             if !app.code_select_mode {
                 app.status = build_status(app);
             }
@@ -624,22 +640,23 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
         .split(chunks[1]);
 
     let items: Vec<ListItem> = app
-        .titles
+        .coursebooks
         .iter()
-        .zip(app.lessons.iter())
-        .map(|(t, (id, _))| {
-            if app.queue.contains(id) {
-                ListItem::new(TLine::from(format!("● {t}")))
-                    .style(Style::default().fg(Color::Yellow))
-            } else {
-                ListItem::new(TLine::from(format!("  {t}")))
-            }
+        .enumerate()
+        .map(|(i, (code, name, lessons))| {
+            let mark = if app.queue.contains(&i) { "●" } else { " " };
+            ListItem::new(TLine::from(format!("{} {}  {}  ({} 課)", mark, code, name, lessons.len())))
+                .style(if app.queue.contains(&i) {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                })
         })
         .collect();
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!("課程（已勾 {}）", app.queue.len())),
+            .title(format!("課本（已勾 {}）", app.queue.len())),
     )
     .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
     let mut st = ListState::default();
