@@ -71,6 +71,19 @@ function rmrf(p) {
   if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true });
 }
 
+// 使用 .NET ZipFile 直接解壓，避免 PowerShell Expand-Archive 的模組衝突問題
+function extractZip(archive, dest) {
+  const psCmd = `
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory('${archive}', '${dest}')
+  `;
+  execFileSync(
+    'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    ['-NoProfile', '-Command', psCmd],
+    { stdio: 'inherit' }
+  );
+}
+
 (async () => {
   // 每次安裝都重新下載並解壓，避免沿用舊 exe 造成版本錯位
   rmrf(outDir);
@@ -80,12 +93,7 @@ function rmrf(p) {
   console.log(`[speakdrill] 下載 ${url}`);
   try {
     await download(url, archive);
-    execFileSync(
-      'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-      ['-NoProfile', '-Command',
-        `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${outDir}' -Force`],
-      { stdio: 'inherit' }
-    );
+    extractZip(archive, outDir);
     fs.unlinkSync(archive);
     ensure(outDir);
     console.log(`[speakdrill] 安裝完成：${outDir}`);
