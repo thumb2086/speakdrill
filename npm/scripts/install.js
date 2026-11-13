@@ -81,7 +81,7 @@ function rmrf(p) {
   try {
     await download(url, archive);
     execFileSync(
-      'powershell',
+      'powershell.exe',
       ['-NoProfile', '-Command',
         `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${outDir}' -Force`],
       { stdio: 'inherit' }
