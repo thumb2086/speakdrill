@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use speakdrill_core::{
     audio::list_outputs, config::{cache_dir, config_path, Config},
-    ensure_logged_in, fetch_all_catalogs, fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport,
+    ensure_logged_in, fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport,
     RunOptions, SilentProgress, Vm,
 };
 
@@ -203,11 +203,16 @@ async fn cmd_init(
                         .vm_strip
                         .zip(cfg.vm_bus)
                         .unwrap_or_else(|| vm.default_route());
-                    let _ = vm.route_to_b1(strip);
-                    let _ = vm.set(&format!("bus[{bus}].mute"), 0.0);
-                    cfg.vm_strip = Some(strip);
-                    cfg.vm_bus = Some(bus);
-                    println!("    VoiceMeeter 路由：strip[{strip}] → bus[{bus}]");
+                    if let Err(e) = vm.route_to_b1(strip) {
+                        println!("    VoiceMeeter 路由設定失敗：{e}");
+                    } else {
+                        let _ = vm.set(&format!("bus[{bus}].mute"), 0.0);
+                        cfg.vm_strip = Some(strip);
+                        cfg.vm_bus = Some(bus);
+                        println!("    VoiceMeeter 路由：strip[{strip}] → bus[{bus}]");
+                    }
+                } else {
+                    println!("    VoiceMeeter 未偵測到，跳過路由設定");
                 }
                 cfg.auto_vm_setup = true;
             } else {
@@ -249,42 +254,6 @@ async fn cmd_init(
     println!("  （輸出裝置可留原值；全域預設麥克風不用改）");
     println!("{}", "─".repeat(64));
     Ok(())
-}
-
-fn dirs_model() -> std::path::PathBuf {
-    speakdrill_core::config::config_dir()
-        .join("piper")
-        .join("en_US-lessac-medium.onnx")
-}
-
-/// 找內附的 Kokoro 轉接器（原始碼執行或 npm 安裝都可能在不同層）
-fn resolve_kokoro_script() -> Option<std::path::PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let exe_dir = exe.parent()?.to_path_buf();
-
-    // npm 版：kokoro_tts.py 與 exe 同層
-    let same_dir = exe_dir.join("kokoro_tts.py");
-    if same_dir.exists() {
-        return Some(same_dir);
-    }
-
-    // 原始碼版：往上找 scripts/kokoro_tts.py
-    let mut dir = exe_dir.clone();
-    for _ in 0..4 {
-        let p = dir.join("scripts").join("kokoro_tts.py");
-        if p.exists() {
-            return Some(p);
-        }
-        if !dir.pop() {
-            break;
-        }
-    }
-
-    let cwd = std::env::current_dir().ok()?.join("scripts").join("kokoro_tts.py");
-    if cwd.exists() {
-        return Some(cwd);
-    }
-    None
 }
 
 // ---------------- doctor ----------------

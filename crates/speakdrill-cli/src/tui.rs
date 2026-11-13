@@ -8,11 +8,10 @@ use crossterm::{
 };
 
 use speakdrill_core::{
-    fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport, LineScore,
+    run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport, LineScore,
     Progress, RunOptions, Vm,
 };
 use std::process::Command;
-use std::time::Duration;
 use tokio::time::Duration as TokioDuration;
 
 use ratatui::{
@@ -145,35 +144,39 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
     // 背景載入目錄
     spawn_catalog(&rt, tx.clone(), false);
 
-    // 自動啟動 MyET (背景檢查 CDP port 9222)
+    // 背景檢查 MyET（CDP port 連線）；未連線時只啟動一次並等待 CDP 起來
     let tx_clone = tx.clone();
     rt.spawn(async move {
         tokio::time::sleep(TokioDuration::from_millis(500)).await;
         let cfg = speakdrill_core::Config::load_or_default();
-        let mut attempts = 0;
-        loop {
-            if speakdrill_core::Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
-                let _ = tx_clone.send(Ev::Log("MyET 已連線 (CDP 9222)".into()));
-                break;
-            }
-            attempts += 1;
-            if attempts > 3 {
-                // 啟動 MyET
-                let myet_path = r"C:\Program Files (x86)\LLabs\MyET10\MyET10.exe";
-                if std::path::Path::new(myet_path).exists() {
-                    let _ = Command::new(myet_path)
-                        .args(["--remote-debugging-port=9222", "--remote-allow-origins=*"])
-                        .spawn();
-                    let _ = tx_clone.send(Ev::Log("正在啟動 MyET (debug port 9222)...".into()));
-                    tokio::time::sleep(TokioDuration::from_secs(5)).await;
-                    continue; // 重試連線
-                } else {
-                    let _ = tx_clone.send(Ev::Log("找不到 MyET 執行檔，請手動啟動".into()));
-                    break;
-                }
-            }
-            tokio::time::sleep(TokioDuration::from_secs(2)).await;
+        const MAX_WAIT_SECS: u64 = 20;
+
+        if speakdrill_core::Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
+            let _ = tx_clone.send(Ev::Log(format!("MyET 已連線 (CDP {})", cfg.cdp_port)));
+            return;
         }
+
+        let myet_path = std::env::var("SPEAKDRILL_MYET_PATH")
+            .unwrap_or_else(|_| r"C:\Program Files (x86)\LLabs\MyET10\MyET10.exe".to_string());
+        if !std::path::Path::new(&myet_path).exists() {
+            let _ = tx_clone.send(Ev::Log("找不到 MyET 執行檔，請手動啟動".into()));
+            return;
+        }
+
+        let port_str = cfg.cdp_port.to_string();
+        let _ = Command::new(&myet_path)
+            .args([format!("--remote-debugging-port={}", port_str), "--remote-allow-origins=*".to_string()])
+            .spawn();
+        let _ = tx_clone.send(Ev::Log(format!("正在啟動 MyET (debug port {})...", port_str)));
+
+        for _ in 0..MAX_WAIT_SECS {
+            tokio::time::sleep(TokioDuration::from_secs(1)).await;
+            if speakdrill_core::Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
+                let _ = tx_clone.send(Ev::Log(format!("MyET 已連線 (CDP {})", cfg.cdp_port)));
+                return;
+            }
+        }
+        let _ = tx_clone.send(Ev::Log("MyET 已啟動，但 CDP 未連上".into()));
     });
 
     enable_raw_mode()?;
@@ -212,8 +215,6 @@ fn event_loop(
                 if k.kind != KeyEventKind::Press {
                     continue;
                 }
-                // DEBUG: log all key presses
-                if app.logs.len() > 500 { app.logs.remove(0); }
                 if app.code_select_mode {
                     // CodeName 下拉選單模式
                     let codenames = known_codenames();
@@ -222,8 +223,7 @@ fn event_loop(
                         app.code_select_idx = codenames.len().saturating_sub(1);
                     }
                     match k.code {
-                        KeyCode::Esc | KeyCode::Char('c') => {
-                            if app.logs.len() > 500 { app.logs.remove(0); }
+                        KeyCode::Esc => {
                             // 恢復之前的 status
                             app.code_select_mode = false;
                             app.code_select_idx = 0;
@@ -232,6 +232,8 @@ fn event_loop(
                                 app.status = build_status(app);
                             }
                         }
+                        // Ctrl+C 在選單中也能退出
+                        KeyCode::Char('c') | KeyCode::Char('C') if k.modifiers.contains(KeyModifiers::CONTROL) => return Ok(()),
                         KeyCode::Enter => {
                             let idx = app.code_select_idx.min(codenames.len().saturating_sub(1));
                             let (code, name) = codenames[idx];
@@ -313,18 +315,19 @@ fn event_loop(
                             app.logs.push("... 重新載入目錄".into());
                             spawn_catalog(rt, tx.clone(), true);
                         }
-                        // m 鍵：自動啟動 MyET 並加上 debug port
+                        // m 鍵：手動啟動 MyET（含 debug port，只啟動一次）
                         KeyCode::Char('m') if !app.running => {
-                            app.logs.push("... 正在啟動 MyET (debug port 9222)".into());
-                            let myet_path = r"C:\Program Files (x86)\LLabs\MyET10\MyET10.exe";
-                            if std::path::Path::new(myet_path).exists() {
-                                std::process::Command::new(myet_path)
-                                    .args(["--remote-debugging-port=9222", "--remote-allow-origins=*"])
-                                    .spawn()
-                                    .map(|_| app.logs.push("MyET 已啟動，等待 CDP 連線...".into()))
-                                    .unwrap_or_else(|e| app.logs.push(format!("啟動 MyET 失敗：{}", e)));
-                            } else {
+                            app.logs.push("... 正在啟動 MyET".into());
+                            let myet_path = std::env::var("SPEAKDRILL_MYET_PATH")
+                                .unwrap_or_else(|_| r"C:\Program Files (x86)\LLabs\MyET10\MyET10.exe".to_string());
+                            if !std::path::Path::new(&myet_path).exists() {
                                 app.logs.push("找不到 MyET 執行檔".into());
+                            } else {
+                                let port_str = speakdrill_core::Config::load_or_default().cdp_port.to_string();
+                                let _ = std::process::Command::new(&myet_path)
+                                    .args([format!("--remote-debugging-port={}", port_str), "--remote-allow-origins=*".to_string()])
+                                    .spawn();
+                                app.logs.push(format!("MyET 已啟動 (debug port {})，等待 CDP 連線...", port_str));
                             }
                         }
                         KeyCode::Char('s') => {
@@ -353,7 +356,6 @@ fn event_loop(
                         }
                         // CodeName 切換：c 開啟下拉選單
                         KeyCode::Char('c') if !app.running => {
-                            if app.logs.len() > 500 { app.logs.remove(0); }
                             // 儲存目前 status，以便關閉選單時恢復
                             app.prev_status = std::mem::take(&mut app.status);
                             app.code_select_mode = true;
@@ -374,6 +376,8 @@ fn start_batch(
     stop: Arc<AtomicBool>,
     lessons: Vec<(String, String)>,
 ) {
+    // 清除先前中止請求，讓停止按鈕可重複使用
+    stop.store(false, Ordering::Relaxed);
     app.running = true;
     app.total_done = 0;
     app.avg_sum = 0.0;
@@ -385,7 +389,7 @@ fn start_batch(
         let cdp = match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
             Ok(c) => c,
             Err(e) => {
-                let _ = tx.send(Ev::Fatal(format!("連不上 speakdrill：{e}")));
+                let _ = tx.send(Ev::Fatal(format!("連不上 MyET：{e}")));
                 return;
             }
         };
@@ -403,7 +407,11 @@ fn start_batch(
         if cfg.auto_vm_setup {
             if let Ok(vm) = Vm::connect() {
                 let (strip, _bus) = cfg.vm_strip.zip(cfg.vm_bus).unwrap_or_else(|| vm.default_route());
-                let _ = vm.route_to_b1(strip);
+                if let Err(e) = vm.route_to_b1(strip) {
+                    let _ = tx.send(Ev::Log(format!("VoiceMeeter 路由設定失敗：{e}")));
+                }
+            } else {
+                let _ = tx.send(Ev::Log("VoiceMeeter 未偵測到，跳過路由設定".into()));
             }
         }
 

@@ -33,7 +33,10 @@ impl Vm {
             let lib = libloading::Library::new(path)
                 .map_err(|e| anyhow!("載入 {path} 失敗：{e}"))?;
             let login: libloading::Symbol<unsafe extern "system" fn() -> i32> = lib.get(b"VBVMR_Login")?;
-            login();
+            let login_hr = login();
+            if login_hr != 0 {
+                return Err(anyhow!("VBVMR_Login 失敗 (code={login_hr})，VoiceMeeter 未執行或版本不符"));
+            }
             let typ_f = *lib.get::<unsafe extern "system" fn(*mut i32) -> i32>(b"VBVMR_GetVoicemeeterType")?;
             let set_f = *lib.get::<unsafe extern "system" fn(*const i8, f32) -> i32>(b"VBVMR_SetParameterFloat")?;
             let get_f = *lib.get::<unsafe extern "system" fn(*const i8, *mut f32) -> i32>(b"VBVMR_GetParameterFloat")?;

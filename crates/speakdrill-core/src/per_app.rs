@@ -4,10 +4,6 @@
 //! 不會寫入 registry，也不會修改全域預設裝置。
 
 use anyhow::{anyhow, Result};
-#[cfg(windows)]
-use std::ffi::OsStr;
-#[cfg(windows)]
-use std::os::windows::ffi::OsStrExt;
 use windows::core::GUID;
 
 const CLASS_ID: &str = "Windows.Media.Internal.AudioPolicyConfig";
@@ -67,7 +63,7 @@ type RawFn = unsafe extern "system" fn(*mut c_void) -> HRESULT;
     unsafe fn hstring(utf16: &[u16]) -> Result<*mut c_void, String> {
         let c = combase()?;
         let mut out = std::ptr::null_mut();
-        (c.create_string)(utf16.as_ptr(), utf16.len() as u32, &mut out).ok();
+        let _ = (c.create_string)(utf16.as_ptr(), utf16.len() as u32, &mut out).ok();
         if out.is_null() {
             Err("WindowsCreateString failed".into())
         } else {
@@ -130,7 +126,7 @@ type RawFn = unsafe extern "system" fn(*mut c_void) -> HRESULT;
         let raw_id = crate::winvol::find_endpoint_id_any(path)
             .ok_or_else(|| format!("cannot resolve MMDevice ID from {path}"))?;
 
-        let mirror = if path.contains("0.0.1") {
+        let mirror = if raw_id.contains("0.0.1") {
             "{2eef81be-33fa-4800-9670-1cd474972c3f}"
         } else {
             "{e6327cad-dcec-4949-ae8a-991e976a79d2}"

@@ -110,10 +110,14 @@ fn start_setup(tx: Sender<Ev>) {
             &mut |s| { let _ = tx_log.send(Ev::Log(s)); },
         );
         match res {
-            Ok(()) => { let _ = tx.send(Ev::Log("（設定流程結束）".into())); }
-            Err(e) => { let _ = tx.send(Ev::Fatal(format!("設定失敗：{e}"))); }
+            Ok(()) => {
+                let _ = tx.send(Ev::Log("（設定流程結束）".into()));
+                let _ = tx.send(Ev::SetupDone);
+            }
+            Err(e) => {
+                let _ = tx.send(Ev::Fatal(format!("設定失敗：{e}")));
+            }
         }
-        let _ = tx.send(Ev::SetupDone);
     });
 }
 
@@ -121,6 +125,8 @@ fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<LessonRef>, pas
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
+            // 重置 stop flag，讓停止按鈕可重複使用
+            stop.store(false, Ordering::Relaxed);
             let mut cfg = speakdrill_core::Config::load_or_default();
             cfg.pass_score = pass;
             let cdp = match Cdp::connect("127.0.0.1", cfg.cdp_port).await {

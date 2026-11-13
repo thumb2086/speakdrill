@@ -48,7 +48,7 @@ impl Default for Config {
             app_exe: default_app_exe(),
             tts: TtsConfig {
                 engine: TtsEngine::Command {
-                    template: "python tts_kokoro.py {textfile} {out}".into(),
+                    template: "# 由 speakdrill init 自動設定 Piper；此處保留為相容".into(),
                 },
                 length_scale: 1.0,
             },
@@ -83,7 +83,18 @@ pub fn reports_dir() -> PathBuf {
 impl Config {
     pub fn load_or_default() -> Self {
         match std::fs::read_to_string(config_path()) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+            Ok(s) => match serde_json::from_str(&s) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    // 不要靜默丟掉使用者的設定：保留壞檔，並以預設值續行
+                    if let Ok(_bak) = std::fs::rename(&config_path(), config_path().with_extension("corrupt.json")) {
+                        eprintln!("[speakdrill] 警告：設定檔 {} 損壞（{}），已備份為 corrupt.json，改用預設值", config_path().display(), e);
+                    } else {
+                        eprintln!("[speakdrill] 警告：設定檔 {} 損壞（{}），改用預設值", config_path().display(), e);
+                    }
+                    Config::default()
+                }
+            },
             Err(_) => Config::default(),
         }
     }
@@ -91,8 +102,12 @@ impl Config {
     pub fn save(&self) -> Result<()> {
         let dir = config_dir();
         std::fs::create_dir_all(&dir)?;
-        std::fs::write(config_path(), serde_json::to_string_pretty(self)?)
-            .with_context(|| format!("寫入 {} 失敗", config_path().display()))?;
+        let tmp = dir.join("config.json.tmp");
+        std::fs::write(&tmp, serde_json::to_string_pretty(self)?)
+            .with_context(|| format!("寫入 {} 失敗", tmp.display()))?;
+        let dest = dir.join("config.json");
+        std::fs::rename(&tmp, &dest)
+            .with_context(|| format!("移動到 {} 失敗", dest.display()))?;
         Ok(())
     }
 }

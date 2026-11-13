@@ -4,7 +4,7 @@
 
 Rust 實作，含 CLI、TUI 與原生 GUI（egui，不是 Electron / Tauri webview）。
 
-> 目前只支援 **Windows x64**（相依 VoiceMeeter）。
+> 目前只支援 **Windows x64**。可選用 **VB-CABLE**（零設定、自動安裝）或 **VoiceMeeter**（Banana/Potato）。
 
 ## 安裝
 
@@ -28,10 +28,11 @@ speakdrill doctor
 ## 快速開始
 
 ```bash
-speakdrill init                  # 偵測裝置、寫設定、設 VoiceMeeter 路由、拉音量
+speakdrill init                  # 偵測裝置、寫設定、自動安裝 VB-CABLE 或設 VoiceMeeter 路由、拉音量
+speakdrill setup                 # 自動完成 per-app 麥克風綁定（原本需手動在 ms-settings:apps-volume 設定）
 speakdrill doctor                # 檢查環境
-speakdrill                      # 終端機介面（預設）
-speakdrill list                 # 列出課程
+speakdrill                       # 終端機介面（預設）
+speakdrill list                  # 列出課程
 speakdrill-gui                   # 原生 GUI
 speakdrill run  --lesson <ID> --course <ID>
 speakdrill batch --code <CODE> --limit 5
@@ -40,12 +41,12 @@ speakdrill reset                 # 還原音訊路由
 
 ## 前置需求
 
-1. **VoiceMeeter**（Banana 或 Potato）
+1. **VB-CABLE**（推薦，零設定）或 **VoiceMeeter**（Banana / Potato）
+   - `speakdrill init --install-driver` 會自動下載並安裝 VB-CABLE（需管理員權限）
+   - 已安裝 VoiceMeeter 者可直接使用，`init` 會偵測並設定路由
 2. **不需要額外裝 TTS**：`speakdrill init` 自動下載 Piper
-3. 目標 App 需開啟 debug port：
-   `--remote-debugging-port=9222 --remote-allow-origins=*`
-4. 在 `ms-settings:apps-volume` 把目標 App 的**輸入裝置**設成 `Voicemeeter Out B1`
-   （這步只能用介面做，Windows 會產生綁定 GUID）
+3. **MyET 的 debug port**：TUI 啟動時會自動檢查 port 9222，沒連上就自動啟動 MyET（帶 `--remote-debugging-port=9222 --remote-allow-origins=*`）；也可以在 TUI 裡按 `m` 手動啟動
+4. **per-app 麥克風綁定**：`speakdrill setup` 會自動完成（原本需手動在 `ms-settings:apps-volume` 設定），VB-CABLE 時會綁定 `CABLE Output (VB-Audio Virtual Cable)`，VoiceMeeter 時綁定 `Voicemeeter Out B1`
 
 ## 文件
 

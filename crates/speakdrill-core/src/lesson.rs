@@ -181,12 +181,13 @@ async fn fetch_catalog_live(cdp: &Cdp, _server: &str, code: &str, content_type: 
 
     // Retry logic for "Inspected target navigated or closed" errors
     let mut last_err = None;
-    for attempt in 1..=3 {
+    for _attempt in 1..=3 {
         match cdp.eval_string(&js).await {
             Ok(json) => {
                 let rows: Vec<RawRow> = serde_json::from_str(&json).unwrap_or_default();
                 if rows.is_empty() {
                     last_err = Some(anyhow!("抓不到課程，可能沒登入或 CodeName 不對（試試 --refresh 或先登入）"));
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
                     continue;
                 }
                 return Ok(rows
@@ -211,7 +212,6 @@ async fn fetch_catalog_live(cdp: &Cdp, _server: &str, code: &str, content_type: 
                 break;
             }
         }
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     }
     Err(last_err.unwrap_or_else(|| anyhow!("抓取課程失敗，已重試 3 次")))
 }
@@ -224,37 +224,7 @@ struct RawRow {
     title: String,
     #[serde(default)]
     score: Option<f64>,
-}
-
-/// 解析 `CategoryLessonScores.aspx` 的 `<div class="data-tr">` 列
-fn parse_score_rows(html: &str) -> Vec<LessonRef> {
-    let title_re = Regex::new(r#"(?s)<div class="lesson-title-td">(.*?)</div>"#).unwrap();
-    let score_re = Regex::new(r#"<div class="score">([0-9]+(?:\.[0-9]+)?)</div>"#).unwrap();
-    let id_re = Regex::new(r#"data-lessonid="([^"]+)""#).unwrap();
-    let course_re = Regex::new(r#"data-courseid="([^"]+)""#).unwrap();
-    let tag_re = Regex::new(r"<[^>]+>").unwrap();
-
-    let mut out = Vec::new();
-    // Rust 的 regex 沒有 lookahead，用 split 切每一列
-    for body in html.split(r#"<div class="data-tr">"#).skip(1) {
-        let Some(id) = id_re.captures(body) else { continue };
-        let Some(course) = course_re.captures(body) else { continue };
-        let title = title_re
-            .captures(body)
-            .map(|t| unescape(tag_re.replace_all(&t[1], " ").trim()))
-            .unwrap_or_default();
-        let best_score = score_re
-            .captures(body)
-            .and_then(|s| s[1].parse::<f64>().ok());
-        out.push(LessonRef {
-            lesson_id: id[1].to_string(),
-            course_id: course[1].to_string(),
-            title,
-            best_score,
-        });
-    }
-    out
-}
+} 
 
 fn unescape(s: &str) -> String {
     s.replace("&amp;", "&")

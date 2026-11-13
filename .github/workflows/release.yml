@@ -3,17 +3,40 @@ name: release
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 # npm Trusted Publisher（OIDC）需要 id-token: write
 permissions:
-  contents: write # 上傳 GitHub Release
-  id-token: write # npm 以 OIDC 換短期發佈權杖
+  contents: write     # 寫入 GitHub Release
+  id-token: write     # npm 以 OIDC 自動發佈
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # ── 1. 建 Windows 二進位（CLI + GUI）並發 Release ─────────────
-  build:
+  verify:
     runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 核對 tag / Cargo.toml / package.json 版本一致
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME -replace '^v',''
+          $cargo = Get-Content Cargo.toml -Raw
+          if ($cargo -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw 'Cargo.toml 找不到 [workspace.package].version' }
+          $ws = $Matches[1]
+          $pkg = Get-Content npm\package.json -Raw | ConvertFrom-Json
+          if ($pkg.version -ne $ws) { throw "npm/package.json ($($pkg.version)) 與 Cargo.toml ($ws) 不一致" }
+          if ($tag -ne $ws) { throw "tag ($tag) 與 Cargo.toml / npm/package.json ($ws) 不一致；請先 bump 版本再打 tag" }
+          Write-Output "Version OK: $ws"
+
+  # ── 1. 在 Windows 上編譯（CLI + GUI），並上傳到 Releases ─────────────
+  build:
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +54,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item "target/release/speakdrill.exe"     "$out/"
           Copy-Item "target/release/speakdrill-gui.exe" "$out/"
-          Copy-Item "scripts/kokoro_tts.py"             "$out/"
           Compress-Archive -Path "$out/*" `
             -DestinationPath "speakdrill-${{ github.ref_name }}-win32-x64.zip"
 
@@ -41,17 +63,19 @@ jobs:
           files: speakdrill-*.zip
           generate_release_notes: true
 
-  # ── 2. 發佈 npm 套件（Trusted Publisher / OIDC，不用 token）────
+  # ── 2. 發佈 npm 套件（Trusted Publisher / OIDC，不需 token）─────────────
   npm:
-    needs: build
+    needs: verify
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Ensure npm >= 11.5.1
         run: npm install -g npm@11
@@ -64,4 +88,4 @@ jobs:
       - name: Publish
         working-directory: npm
         run: npm publish --access public
-        # 注意：不要設 NODE_AUTH_TOKEN，npm 會自動偵測 OIDC
+        # 完全不用設 NODE_AUTH_TOKEN，npm 會自動走 OIDC

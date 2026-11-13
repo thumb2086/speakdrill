@@ -180,7 +180,7 @@ pub async fn run_lesson(
     opts: &RunOptions,
     p: &mut dyn Progress,
 ) -> Result<LessonReport> {
-    check_app_binding(cfg, opts.force)?;
+    check_app_binding(cfg, opts.force, p)?;
     let started = Instant::now();
     let query = scoring_query(lesson_id, &cfg.code, &cfg.content_type, cfg.mode, course_id);
     let lines = fetch_lines(cdp, &query).await?;
@@ -230,7 +230,7 @@ pub async fn run_lesson(
             let t = &e.text;
             last_event = Instant::now();
 
-            if let Some(cap) = regex::Regex::new(r#"RENEW"\s+SentenceIdxArray="(\d+)""#)
+            if let Some(cap) = regex::Regex::new(r#"RENEW\s+SentenceIdxArray="(\d+)""#)
                 .unwrap()
                 .captures(t)
             {
@@ -402,10 +402,10 @@ pub fn save_report(r: &LessonReport) -> Result<PathBuf> {
 ///
 /// 這是今天踩到的大坑：App 聽 A 裝置、我們播到 B 裝置，
 /// 結果每一句都 4 分，而且完全看不出原因。這裡直接擋下來並講清楚怎麼修。
-pub fn check_app_binding(cfg: &Config, force: bool) -> Result<()> {
+pub fn check_app_binding(cfg: &Config, force: bool, p: &mut dyn Progress) -> Result<()> {
     #[cfg(not(windows))]
     {
-        let _ = (cfg, force);
+        let _ = (cfg, force, p);
         return Ok(());
     }
 
@@ -423,8 +423,8 @@ pub fn check_app_binding(cfg: &Config, force: bool) -> Result<()> {
         };
 
         let Some(bind) = crate::binding::app_mic_binding(&cfg.app_exe) else {
-            println!("⚠ 找不到「{}」的 per-app 麥克風設定", cfg.app_exe);
-            println!("  請到 ms-settings:apps-volume 把它設成「{}」", route.mic_device);
+            p.log(&format!("⚠ 找不到「{}」的 per-app 麥克風設定", cfg.app_exe));
+            p.log(&format!("  請到 ms-settings:apps-volume 把它設成「{}」", route.mic_device));
             if force {
                 return Ok(());
             }
@@ -439,15 +439,15 @@ pub fn check_app_binding(cfg: &Config, force: bool) -> Result<()> {
 
         match bind.best_guid().as_deref() {
             Some(g) => {
-                println!("⚠ per-app 麥克風不一致（按 app 實際使用的 role 判定）");
-                println!("  App 目前聽：{}", g);
-                println!("  我們播到  ：{}", expected);
-                println!(
+                p.log("⚠ per-app 麥克風不一致（按 app 實際使用的 role 判定）");
+                p.log(&format!("  App 目前聽：{}", g));
+                p.log(&format!("  我們播到  ：{}", expected));
+                p.log(&format!(
                     "  修正：ms-settings:apps-volume → {} → 輸入裝置選「{}」",
                     cfg.app_exe, route.mic_device
-                );
+                ));
                 if force {
-                    println!("  （--force：仍繼續執行）");
+                    p.log("  （--force：仍繼續執行）");
                     return Ok(());
                 }
                 return Err(anyhow!(
@@ -455,9 +455,9 @@ pub fn check_app_binding(cfg: &Config, force: bool) -> Result<()> {
                 ));
             }
             None => {
-                println!("⚠ 讀不到 App 的 per-app 麥克風設定");
+                p.log("⚠ 讀不到 App 的 per-app 麥克風設定");
                 if force {
-                    println!("  （--force：仍繼續執行）");
+                    p.log("  （--force：仍繼續執行）");
                     return Ok(());
                 }
                 return Err(anyhow!(

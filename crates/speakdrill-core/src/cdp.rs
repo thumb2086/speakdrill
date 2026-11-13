@@ -201,19 +201,19 @@ impl Cdp {
         Ok(cdp)
     }
 
-    /// 檢查是否有 MyET 相關的 target 正在運行
+    /// 檢查是否有可用的 page target 正在運行（例如 MyET 主視窗）
     pub async fn check_myet_running(host: &str, port: u16) -> bool {
         match tokio::task::spawn_blocking({
             let host = host.to_string();
             move || http_get(&host, port, "/json/list")
-        }).await {
+        })
+        .await
+        {
             Ok(Ok(body)) => {
                 if let Ok(list) = serde_json::from_str::<Value>(&body) {
                     if let Some(arr) = list.as_array() {
                         return arr.iter().any(|t| {
-                            t.get("url").and_then(|v| v.as_str())
-                                .map(|u| u.contains("myet.com") || u.contains("140.125"))
-                                .unwrap_or(false)
+                            t.get("type").and_then(|v| v.as_str()) == Some("page")
                         });
                     }
                 }
@@ -307,7 +307,7 @@ impl Cdp {
                 }
             }
         }
-        Ok(())
+        bail!("導覽逾時：{url} 超過 40 秒未完成載入")
     }
 
     /// 取目前頁面完整 HTML（透過 DOM，避免額外網路請求）

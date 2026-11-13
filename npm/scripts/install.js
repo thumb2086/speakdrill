@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * 安裝時下載對應平台的原生二進位。
+ * speakdrill 安裝腳本：從 GitHub Releases 下載預編譯執行檔。
  *
- * 環境變數：
- *   SPEAKDRILL_SKIP_DOWNLOAD=1   跳過下載（本機開發用，會直接用 target/ 的執行檔）
- *   SPEAKDRILL_VERSION           指定版本（預設讀 package.json）
+ * 停用下載：
+ *   SPEAKDRILL_SKIP_DOWNLOAD=1   跳過下載（可改讀 target/ 的本機 build）
+ *   SPEAKDRILL_VERSION           覆寫版本（預設讀 package.json）
  *   SPEAKDRILL_REPO              覆寫 GitHub repo（預設 thumb2086/speakdrill）
  */
 const fs = require('fs');
@@ -17,14 +17,12 @@ const VERSION = process.env.SPEAKDRILL_VERSION || pkg.version;
 const REPO = process.env.SPEAKDRILL_REPO || 'thumb2086/speakdrill';
 
 if (process.env.SPEAKDRILL_SKIP_DOWNLOAD === '1') {
-  console.log('[speakdrill] SPEAKDRILL_SKIP_DOWNLOAD=1，跳過下載');
+  console.log('[speakdrill] SPEAKDRILL_SKIP_DOWNLOAD=1；跳過下載');
   process.exit(0);
 }
 
 if (process.platform !== 'win32') {
-  console.log(
-    `[speakdrill] 目前只支援 Windows（需要 VoiceMeeter）。你的平台是 ${process.platform}，跳過安裝。`
-  );
+  console.log(`[speakdrill] 目前僅支援 Windows（VB-CABLE / VoiceMeeter）；本平台為 ${process.platform}，跳過安裝`);
   process.exit(0);
 }
 
@@ -39,7 +37,7 @@ const url = `https://github.com/${REPO}/releases/download/${tag}/${asset}`;
 function download(u, dest) {
   return new Promise((resolve, reject) => {
     const go = (u2, depth = 0) => {
-      if (depth > 5) return reject(new Error('太多重新導向'));
+      if (depth > 5) return reject(new Error('too many redirects'));
       https
         .get(u2, { headers: { 'User-Agent': 'speakdrill-installer' } }, (res) => {
           if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -60,15 +58,24 @@ function download(u, dest) {
   });
 }
 
+function ensure(outDir) {
+  for (const exe of exes) {
+    const p = path.join(outDir, exe);
+    if (!fs.existsSync(p)) {
+      throw new Error(`安裝後找不到 ${exe}（解壓或下載失敗）`);
+    }
+  }
+}
+
+function rmrf(p) {
+  if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true });
+}
+
 (async () => {
+  // 每次安裝都重新下載並解壓，避免沿用舊 exe 造成版本錯位
+  rmrf(outDir);
   fs.mkdirSync(outDir, { recursive: true });
   const archive = path.join(outDir, asset);
-
-  const existing = path.join(outDir, exes[0]);
-  if (fs.existsSync(existing)) {
-    console.log(`[speakdrill] 已存在 ${existing}`);
-    return;
-  }
 
   console.log(`[speakdrill] 下載 ${url}`);
   try {
@@ -80,10 +87,11 @@ function download(u, dest) {
       { stdio: 'inherit' }
     );
     fs.unlinkSync(archive);
-    console.log(`[speakdrill] 安裝完成 → ${outDir}`);
+    ensure(outDir);
+    console.log(`[speakdrill] 安裝完成：${outDir}`);
   } catch (e) {
-    console.error(`[speakdrill] 下載失敗：${e.message}`);
-    console.error('[speakdrill] 可改用手動安裝，或設定 SPEAKDRILL_SKIP_DOWNLOAD=1 使用本機建置');
-    process.exit(0); // 不讓 npm install 整個失敗
+    console.error(`[speakdrill] 下載/解壓失敗：${e.message}`);
+    console.error('[speakdrill] 可改用 SPEAKDRILL_SKIP_DOWNLOAD=1 略過下載');
+    process.exit(1);
   }
 })();

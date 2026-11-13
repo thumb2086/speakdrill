@@ -134,11 +134,13 @@ speakdrill setup --restart-settings  # 「設定」視窗卡死時，先關閉�
 ```
 
 GUI 的頂端也有「🔧 自動設定音訊」按鈕與「▶ 跑佇列（N）」按鈕，呼叫同一段程式；左側課程清單有核取方塊可勾選加入佇列。
-終端機介面（TUI）：`Space` 勾/取消佇列（黃色 ●）、`Enter` 執行（有佇列就跑佇列，否則跑選取的單一課程）、`a` 全選/取消、`x` 清佇列、`b` 跑全部。
+終端機介面（TUI）：`Space` 勾/取消（黃色 ●）、`Shift+Space` 把同 course_id 的整課程加入佇列、`Enter` 執行（有佇列跑佇列，沒有就跑選取）、`a` 全選/取消、`x` 清空佇列、`b` 或 `B` 跑全部、`c` 開啟課本切換選單、`r` 重新載入目錄、`m` 自動啟動 MyET、`s` 請求中止、`Ctrl+C`/`q`/`Esc` 離開。
 注意：**目標 App 必須啟動過且用過麥克風**（Windows mixer 只列有 audio session 的 App）。
 手動 fallback：`ms-settings:apps-volume` → 找到目標 App（MyET 會顯示為 **English-Chinese-Japanese**）→ 展開 → 輸入裝置 → `CABLE Output (VB-Audio Virtual Cable)`。
 
-### 目標 App 要開 debug port
+### MyET 的 debug port（已自動化）
+
+TUI 啟動時會自動檢查 port 9222，沒連上就自動啟動 MyET（帶 `--remote-debugging-port=9222 --remote-allow-origins=*`）。也可以在 TUI 裡按 `m` 手動啟動，或用下面指令手動開：
 
 ```powershell
 & "C:\Program Files (x86)\LLabs\MyET10\MyET10.exe" `
@@ -219,7 +221,7 @@ speakdrill reset --yes            # 連設定檔一起刪
 ```
 crates/
   speakdrill-core/   CDP client、課程解析、音訊（cpal）、VoiceMeeter、TTS、per-app 音訊設定（COM + UIA）、流程
-  speakdrill-cli/    speakdrill（init / doctor / reset / run / batch / tui / setup）
+  speakdrill-cli/    speakdrill（init / doctor / reset / run / batch / all / list / tui / setup）
   speakdrill-gui/    speakdrill-gui（egui，原生，無 webview）
 npm/                 npm 包裝器（下載 GitHub Releases 的原生二進位）
 scripts/             audio-uia.ps1（UIA 助手，隨 binary 發布）、kokoro_tts.py（開發用）
