@@ -213,7 +213,6 @@ fn event_loop(
                     continue;
                 }
                 // DEBUG: log all key presses
-                app.logs.push(format!("KEY: {:?} modifiers={:?} code_select_mode={} running={}", k.code, k.modifiers, app.code_select_mode, app.running));
                 if app.logs.len() > 500 { app.logs.remove(0); }
                 if app.code_select_mode {
                     // CodeName 下拉選單模式
@@ -224,8 +223,6 @@ fn event_loop(
                     }
                     match k.code {
                         KeyCode::Esc | KeyCode::Char('c') => {
-                            // DEBUG: c/Esc key handler in code_select_mode
-                            app.logs.push("DEBUG: 'c' or Esc key handler triggered in code_select_mode".into());
                             if app.logs.len() > 500 { app.logs.remove(0); }
                             // 恢復之前的 status
                             app.code_select_mode = false;
@@ -356,10 +353,6 @@ fn event_loop(
                         }
                         // CodeName 切換：c 開啟下拉選單
                         KeyCode::Char('c') if !app.running => {
-                            // DEBUG: c key handler reached - write to file for verification
-                            std::fs::write("C:\\Users\\CPXru\\.thumb-work\\c_key_triggered.txt", format!("c key handler triggered at {:?}, running={}, code_select_mode={}", std::time::SystemTime::now(), app.running, app.code_select_mode)).ok();
-                            // DEBUG: c key handler reached
-                            app.logs.push("DEBUG: 'c' key handler triggered in normal mode".into());
                             if app.logs.len() > 500 { app.logs.remove(0); }
                             // 儲存目前 status，以便關閉選單時恢復
                             app.prev_status = std::mem::take(&mut app.status);
