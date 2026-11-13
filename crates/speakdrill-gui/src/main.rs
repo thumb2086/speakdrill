@@ -51,6 +51,10 @@ struct App {
     setup_busy: bool,
     /// 佇列（以 lesson_id 為鍵，catalog 重抓後仍然有效）
     queue: HashSet<String>,
+    /// 目前選擇的 CodeName 索引
+    code_idx: usize,
+    /// 可用的 CodeName 清單
+    codenames: Vec<(&'static str, &'static str)>,
 }
 
 impl App {
@@ -80,6 +84,8 @@ impl App {
             pass: 80,
             setup_busy: false,
             queue: HashSet::new(),
+            code_idx: 0,
+            codenames: known_codenames(),
         };
         load_catalog(tx.clone(), stop);
         app
@@ -156,6 +162,45 @@ fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<LessonRef>, pas
     });
 }
 
+fn known_codenames() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("BKM_1A", "書林美語走天下-1A"),
+        ("BKM_1B", "書林美語走天下-1B"),
+        ("BKM_2A", "書林美語走天下-2A"),
+        ("BKM_2B", "書林美語走天下-2B"),
+        ("BKM_3A", "書林美語走天下-3A"),
+        ("BKM_3B", "書林美語走天下-3B"),
+        ("BKM_4A", "書林美語走天下-4A"),
+        ("BKM_4B", "書林美語走天下-4B"),
+    ]
+}
+
+impl App {
+    /// 切換 CodeName 並重新載入目錄
+    fn switch_codename(&mut self, code: &str) {
+        let mut cfg = speakdrill_core::Config::load_or_default();
+        cfg.code = code.to_string();
+        cfg.save().ok();
+        self.logs.push(format!("已切換課本：{}，重新載入目錄…", code));
+        self.status = "載入目錄中…".into();
+        self.lessons.clear();
+        self.queue.clear();
+        load_catalog(self.tx.clone(), self.stop.clone());
+    }
+
+    /// 把指定 CodeName 下的所有課程加入佇列
+    fn add_course_to_queue(&mut self, code: &str) {
+        let count_before = self.queue.len();
+        for l in &self.lessons {
+            if l.course_id.starts_with(code) {
+                self.queue.insert(l.lesson_id.clone());
+            }
+        }
+        let added = self.queue.len() - count_before;
+        self.logs.push(format!("已加入 {} 個單元（課本：{}）", added, code));
+    }
+}
+
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         [0.055, 0.055, 0.07, 1.0]
@@ -204,8 +249,23 @@ impl eframe::App for App {
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.heading("MyET 口說自動練習");
+                ui.heading(format!("MyET 口說自動練習  v{}", env!("CARGO_PKG_VERSION")));
                 ui.separator();
+                
+                // CodeName 切換下拉選單
+                ui.label("課本：");
+                egui::ComboBox::from_id_source("codename_select")
+                    .selected_text(self.codenames[self.code_idx].1)
+                    .show_ui(ui, |ui| {
+                        for i in 0..self.codenames.len() {
+                            let (code, name) = self.codenames[i];
+                            if ui.selectable_value(&mut self.code_idx, i, name).clicked() {
+                                self.switch_codename(code);
+                            }
+                        }
+                    });
+                ui.separator();
+                
                 if ui.add_enabled(!self.running, egui::Button::new("▶ 跑選取")).clicked() {
                     if let Some(l) = self.lessons.get(self.sel).cloned() {
                         self.running = true;
@@ -213,6 +273,11 @@ impl eframe::App for App {
                     }
                 }
                 let qn = self.queue.len();
+                // 加入整個課程到佇列（按目前 CodeName 下的所有課程）
+                if ui.add_enabled(!self.running, egui::Button::new("➕ 加入整課程")).clicked() {
+                    let current_code = self.codenames[self.code_idx].0;
+                    self.add_course_to_queue(current_code);
+                }
                 if ui.add_enabled(!self.running && qn > 0, egui::Button::new(format!("▶ 跑佇列（{qn}）"))).clicked() {
                     let picked: Vec<LessonRef> = self
                         .lessons

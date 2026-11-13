@@ -54,3 +54,13 @@
   - config.rs：預設 TTS 模板改為說明由 init 自動設定 Piper
   - 移除 npm/bin/binaries/ 陳舊 exe、npm/speakdrill-0.1.2.tgz、根目錄一次性腳本（bump_version.py 等）
   準備 bump 版本 → tag → 推送 → CI 驗收。
+- [2026-11-14] checkpoint7：發布完成 ✅
+  - v0.2.14 已推送 tag，CI release workflow 全部通過（verify、build、npm）
+  - npm package 0.2.14 已發布至 registry，`latest` 標籤指向 0.2.14
+  - `npm i -g speakdrill@latest` 實測安裝成功，`speakdrill --version` 顯示 0.2.14
+  - `speakdrill doctor` 顯示「全部正常」，`speakdrill list --refresh` 正確回傳 39 課目錄
+  - install.js 修復：改用 .NET ZipFile::ExtractToDirectory 直接解壓，解決 PowerShell 7 模組衝突導致的解壓失敗
+  - GitHub Release v0.2.14 已建立，含 speakdrill.exe、speakdrill-gui.exe
+  - 所有停止條件已滿足，目標達成
+- Status: completed
+- Updated: 2026-11-14T18:45:00+08:00

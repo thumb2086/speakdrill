@@ -64,7 +64,7 @@ fn build_status(app: &App) -> String {
         "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into()
     } else {
         format!(
-            "{} 課（{}）  ↑/↓ 移動 · Space 單選 · Shift+Space 整課程 · Enter 執行（{}）· b 全部 · c 切換課本 · q 離開",
+            "{} 課（{}）  ↑/↓ 移動 · Space 單選 · Shift+Space 整課程 · g 加入課本 · Enter 執行（{}）· b 全部 · c 切換課本 · q 離開",
             app.lessons.len(),
             if queued > 0 { format!("已勾 {queued} 課") } else { "Enter 跑單一課程".to_string() },
             if queued > 0 { "佇列" } else { "選取" },
@@ -90,6 +90,8 @@ struct App {
     /// CodeName 選單模式
     code_select_mode: bool,
     code_select_idx: usize,
+    /// CodeName 多選模式下的已選索引
+    code_select_selected: HashSet<usize>,
     /// 儲存開啟 CodeName 選單前的 status，關閉時恢復
     prev_status: String,
 }
@@ -138,6 +140,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         queue: HashSet::new(),
         code_select_mode: false,
         code_select_idx: 0,
+        code_select_selected: HashSet::new(),
         prev_status: String::new(),
     };
 
@@ -235,19 +238,46 @@ fn event_loop(
                         // Ctrl+C 在選單中也能退出
                         KeyCode::Char('c') | KeyCode::Char('C') if k.modifiers.contains(KeyModifiers::CONTROL) => return Ok(()),
                         KeyCode::Enter => {
-                            let idx = app.code_select_idx.min(codenames.len().saturating_sub(1));
-                            let (code, name) = codenames[idx];
-                            let mut cfg = speakdrill_core::Config::load_or_default();
-                            cfg.code = code.to_string();
-                            cfg.save().ok();
-                            app.logs.push(format!("已切換課本：{}（{}），重新載入目錄…", name, code));
-                            app.code_select_mode = false;
-                            app.code_select_idx = 0;
-                            app.status = std::mem::take(&mut app.prev_status);
-                            if app.status.is_empty() {
-                                app.status = build_status(app);
+                            let mut selected = app.code_select_selected.clone();
+                            if selected.is_empty() {
+                                selected.insert(app.code_select_idx);
                             }
-                            spawn_catalog(rt, tx.clone(), true);
+                            // 先切換到第一個並 reload
+                            if let Some(&first_idx) = selected.iter().next() {
+                                let (code, name) = codenames[first_idx];
+                                let mut cfg = speakdrill_core::Config::load_or_default();
+                                cfg.code = code.to_string();
+                                cfg.save().ok();
+                                app.logs.push(format!("已切換課本：{}（{}），重新載入目錄…", name, code));
+                                app.code_select_mode = false;
+                                app.code_select_idx = 0;
+                                app.code_select_selected.clear();
+                                app.status = std::mem::take(&mut app.prev_status);
+                                if app.status.is_empty() {
+                                    app.status = build_status(app);
+                                }
+                                spawn_catalog(rt, tx.clone(), true);
+                                // 其餘選中的加入佇列
+                                for &idx in &selected {
+                                    if idx != first_idx {
+                                        let (code, _name) = codenames[idx];
+                                        let prefix = code.replace('_', "-B").replace("BKM-B", "BKM-B") + "-";
+                                        for (lesson_id, course_id) in &app.lessons {
+                                            if course_id.starts_with(&prefix) {
+                                                app.queue.insert(lesson_id.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Space：切換多選
+                        KeyCode::Char(' ') => {
+                            if app.code_select_selected.contains(&app.code_select_idx) {
+                                app.code_select_selected.remove(&app.code_select_idx);
+                            } else {
+                                app.code_select_selected.insert(app.code_select_idx);
+                            }
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
                             // 使用 checked_add 避免溢位
@@ -361,6 +391,21 @@ fn event_loop(
                             app.code_select_mode = true;
                             app.code_select_idx = 0;
                             app.status = "選擇課本（↑/↓ 選擇，Enter 確認，Esc 取消）".into();
+                        }
+                        // g 鍵：把目前課本（CodeName）的所有單元加入佇列
+                        KeyCode::Char('g') if !app.running && !app.lessons.is_empty() => {
+                            let cfg = speakdrill_core::Config::load_or_default();
+                            let code = &cfg.code;
+                            // CodeName 格式：BKM_1A -> course_id 前綴：BKM-B1A-
+                            let prefix = code.replace('_', "-B").replace("BKM-B", "BKM-B") + "-";
+                            let count_before = app.queue.len();
+                            for (lesson_id, course_id) in &app.lessons {
+                                if course_id.starts_with(&prefix) {
+                                    app.queue.insert(lesson_id.clone());
+                                }
+                            }
+                            let added = app.queue.len() - count_before;
+                            app.logs.push(format!("已加入課本 {} 共 {} 個單元（course_id 前綴：{}）", code, added, prefix));
                         }
                         _ => {}
                     }
@@ -510,8 +555,10 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
         .split(f.area());
 
     let avg = if app.avg_n > 0 { app.avg_sum / app.avg_n as f64 } else { 0.0 };
+    let version = env!("CARGO_PKG_VERSION");
     let header = Paragraph::new(TLine::from(vec![
         Span::styled(" speakdrill ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(format!(" v{} ", version), Style::default().fg(Color::Cyan).bg(Color::Black).add_modifier(Modifier::BOLD)),
         Span::raw(format!("  {} 課", app.lessons.len())),
         Span::raw(if app.running { "   ● 執行中" } else { "" }),
         Span::raw(format!("   完成 {} 句  平均 {:.1}", app.total_done, avg)),
@@ -563,7 +610,7 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
     f.render_widget(log, body[1]);
 
     let footer_text = if app.code_select_mode {
-        format!("選擇課本（↑/↓ 選擇，Enter 確認，Esc 取消)")
+        format!("選擇課本（↑/↓ 選擇，Space 多選，Enter 套用，Esc 取消） — 已選 {} 本", app.code_select_selected.len())
     } else {
         app.status.clone()
     };
@@ -580,16 +627,17 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
             .iter()
             .enumerate()
             .map(|(i, (code, name))| {
+                let selected_mark = if app.code_select_selected.contains(&i) { "☑ " } else { "☐ " };
                 let style = if i == clamped_idx {
                     Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
-                ListItem::new(TLine::from(format!("{}  {}", code, name))).style(style)
+                ListItem::new(TLine::from(format!("{} {}  {}", selected_mark, code, name))).style(style)
             })
             .collect();
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("選擇課本 (CodeName)"))
+            .block(Block::default().borders(Borders::ALL).title("選擇課本 (CodeName) — Space 多選，Enter 套用"))
             .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
         let mut st = ListState::default();
         st.select(Some(clamped_idx));
