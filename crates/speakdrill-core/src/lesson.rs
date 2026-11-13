@@ -90,6 +90,34 @@ pub async fn fetch_catalog_opts(
     Ok(lessons)
 }
 
+/// 取得所有課程（跨所有已知 CodeName）
+pub async fn fetch_all_catalogs(
+    cdp: &Cdp,
+    server: &str,
+    content_type: &str,
+    refresh: bool,
+) -> Result<Vec<LessonRef>> {
+    use crate::config::KNOWN_CODENAMES;
+    let mut all_lessons = Vec::new();
+    
+    for (code, name) in KNOWN_CODENAMES {
+        match fetch_catalog_opts(cdp, server, code, content_type, refresh).await {
+            Ok(mut lessons) => {
+                // 為每個課程加上 CodeName 標記
+                for lesson in &mut lessons {
+                    lesson.title = format!("{}  [{}]", lesson.title, name);
+                }
+                all_lessons.extend(lessons);
+            }
+            Err(e) => {
+                eprintln!("CodeName {} ({}) 抓取失敗: {}", code, name, e);
+            }
+        }
+    }
+    
+    Ok(all_lessons)
+}
+
 #[derive(Serialize, Deserialize)]
 struct CatalogCache {
     fetched_at: CacheStamp,

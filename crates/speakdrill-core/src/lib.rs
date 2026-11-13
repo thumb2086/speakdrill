@@ -18,8 +18,8 @@ pub mod winvol;
 
 pub use audio::AudioPlayer;
 pub use cdp::Cdp;
-pub use config::Config;
-pub use lesson::{fetch_catalog, fetch_lines, scoring_query, scoring_url, LessonRef, Line};
+pub use config::{Config, KNOWN_CODENAMES, all_codenames};
+pub use lesson::{fetch_all_catalogs, fetch_catalog, fetch_lines, scoring_query, scoring_url, LessonRef, Line};
 pub use pipeline::{
     ensure_logged_in, ensure_tts, run_lesson, save_report, LessonReport, LineScore, Progress,
     RunOptions, SilentProgress,

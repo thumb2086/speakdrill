@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use speakdrill_core::{
     audio::list_outputs, config::{cache_dir, config_path, Config},
-    ensure_logged_in, fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport,
+    ensure_logged_in, fetch_all_catalogs, fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport,
     RunOptions, SilentProgress, Vm,
 };
 
@@ -46,6 +46,16 @@ enum Cmd {
         /// 跳過已有成績的課程
         #[arg(long)] skip_completed: bool,
         #[arg(long)] code: Option<String>,
+        #[arg(long)] content_type: Option<String>,
+        #[arg(long)] limit: Option<usize>,
+        #[arg(long)] start: Option<usize>,
+        #[arg(long, default_value_t = 80)] pass: u32,
+        #[arg(long)] resume: bool,
+    },
+    /// 跑所有 CodeName 的所有課程
+    All {
+        /// 跳過已有成績的課程
+        #[arg(long)] skip_completed: bool,
         #[arg(long)] content_type: Option<String>,
         #[arg(long)] limit: Option<usize>,
         #[arg(long)] start: Option<usize>,
@@ -107,6 +117,9 @@ fn main() -> Result<()> {
         }
         Cmd::Batch { code, content_type, limit, start, pass, resume, skip_completed } => {
             rt.block_on(cmd_batch(code, content_type, limit, start, pass, resume, skip_completed))
+        }
+        Cmd::All { content_type, limit, start, pass, resume, skip_completed } => {
+            rt.block_on(cmd_all(content_type, limit, start, pass, resume, skip_completed))
         }
         Cmd::List { code, refresh } => rt.block_on(cmd_list(code, refresh)),
         Cmd::Tui => tui::run(rt),
@@ -575,6 +588,49 @@ fn print_report(r: &LessonReport) {
     if let Ok(p) = save_report(r) {
         println!("  報告：{}", p.display());
     }
+}
+
+/// 全部課程批次執行（所有 CodeName）
+async fn cmd_all(
+    content_type: Option<String>,
+    limit: Option<usize>,
+    start: Option<usize>,
+    pass: u32,
+    resume: bool,
+    skip_completed: bool,
+) -> Result<()> {
+    let mut cfg = Config::load_or_default();
+    cfg.pass_score = pass;
+    if let Some(t) = content_type { cfg.content_type = t; }
+
+    let (cdp, player) = make_session(&cfg).await?;
+    let all = speakdrill_core::lesson::fetch_all_catalogs(&cdp, &cfg.server, &cfg.content_type, false).await?;
+    let done_n = all.iter().filter(|l| l.done()).count();
+    println!("全部課程共 {} 課（已練過 {} 課）", all.len(), done_n);
+
+    let mut pool: Vec<&LessonRef> = all.iter().collect();
+    if skip_completed {
+        pool.retain(|l| !l.done());
+        println!("跳過已練過 → 剩 {} 課", pool.len());
+    }
+
+    let begin = start.unwrap_or(0);
+    let sel: Vec<_> = pool.iter().skip(begin).take(limit.unwrap_or(usize::MAX)).collect();
+
+    let mut ok = 0;
+    for (i, l) in sel.iter().enumerate() {
+        println!("\n=== [{}/{}] {} ===", begin + i + 1, all.len(), l.label());
+        let mut p = SilentProgress;
+        match run_lesson(
+            &cdp, &cfg, &player, &l.lesson_id, &l.course_id,
+            &RunOptions { resume, ..Default::default() }, &mut p,
+        ).await {
+            Ok(r) => { print_report(&r); ok += 1; }
+            Err(e) => println!("  ✗ 失敗：{e}"),
+        }
+    }
+    println!("\n全部批次完成：{ok}/{} 課", sel.len());
+    Ok(())
 }
 
 

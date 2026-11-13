@@ -30,9 +30,6 @@ pub struct Config {
     pub tts: TtsConfig,
 }
 
-fn default_app_exe() -> String {
-    "MyET10".to_string()
-}
 
 impl Default for Config {
     fn default() -> Self {
@@ -99,3 +96,37 @@ impl Config {
         Ok(())
     }
 }
+
+/// 所有可用的 CodeName 對應表
+pub static KNOWN_CODENAMES: &[(&str, &str)] = &[
+    ("BKM_1A", "書林美語走天下-1A"),
+    ("BKM_1B", "書林美語走天下-1B"),
+    ("BKM_2A", "書林美語走天下-2A"),
+    ("BKM_2B", "書林美語走天下-2B"),
+    ("BKM_3A", "書林美語走天下-3A"),
+    ("BKM_3B", "書林美語走天下-3B"),
+    ("BKM_GAR_1A", "Getting Around in American English 1A"),
+    ("BKM_GAR_2A", "Getting Around in American English 2A"),
+    ("BKM_AME_1A", "American English 1A"),
+    ("BKM_MBA_SALES", "MBA 英語-銷售管理"),
+    ("BKM_MBA_PROD", "MBA 英語-生產管理"),
+    ("BKM_MBA_FIN", "MBA 英語-財務管理"),
+    ("BKM_MBA_HR", "MBA 英語-人資管理"),
+    ("BKM_MBA_MKT", "MBA 英語-行銷管理"),
+    ("BKM_MBA_RD", "MBA 英語-研發管理"),
+    ("BKM_MICE", "MICE 英語"),
+    ("BKM_TOEIC_1", "多益口說測驗攻略 Part 1"),
+    ("BKM_TOEIC_2", "多益口說測驗攻略 Part 2"),
+    ("BKM_TOEIC_3", "多益口說測驗攻略 Part 3"),
+    ("BKM_TOEIC_SP", "TOEIC Speaking"),
+];
+
+/// 取得所有已知的 CodeName
+pub fn all_codenames() -> Vec<(&'static str, &'static str)> {
+    KNOWN_CODENAMES.to_vec()
+}
+
+pub fn default_app_exe() -> String {
+    "MyET10".to_string()
+}
+
