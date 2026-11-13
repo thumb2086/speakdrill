@@ -201,6 +201,28 @@ impl Cdp {
         Ok(cdp)
     }
 
+    /// 檢查是否有 MyET 相關的 target 正在運行
+    pub async fn check_myet_running(host: &str, port: u16) -> bool {
+        match tokio::task::spawn_blocking({
+            let host = host.to_string();
+            move || http_get(&host, port, "/json/list")
+        }).await {
+            Ok(Ok(body)) => {
+                if let Ok(list) = serde_json::from_str::<Value>(&body) {
+                    if let Some(arr) = list.as_array() {
+                        return arr.iter().any(|t| {
+                            t.get("url").and_then(|v| v.as_str())
+                                .map(|u| u.contains("myet.com") || u.contains("140.125"))
+                                .unwrap_or(false)
+                        });
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
@@ -220,6 +242,21 @@ impl Cdp {
             bail!("CDP {method} 失敗：{err}");
         }
         Ok(v.get("result").cloned().unwrap_or(Value::Null))
+    }
+
+    /// 檢查 WebSocket 連線是否仍然存活
+    pub async fn is_connected(&self) -> bool {
+        // 嘗試發送一個簡單的命令來檢查連線
+        self.call("Runtime.evaluate", json!({
+            "expression": "1+1",
+            "returnByValue": true
+        })).await.is_ok()
+    }
+
+    /// 重新連線到 CDP
+    pub async fn reconnect(&mut self, host: &str, port: u16) -> Result<()> {
+        *self = Self::connect(host, port).await?;
+        Ok(())
     }
 
     /// 在頁面裡 eval 一段 JS，等 Promise 完成，回傳字串。

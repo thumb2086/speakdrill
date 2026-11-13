@@ -11,6 +11,9 @@ use speakdrill_core::{
     fetch_catalog, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport, LineScore,
     Progress, RunOptions, Vm,
 };
+use std::process::Command;
+use std::time::Duration;
+use tokio::time::Duration as TokioDuration;
 
 use ratatui::{
     backend::CrosstermBackend,
@@ -141,6 +144,37 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
 
     // 背景載入目錄
     spawn_catalog(&rt, tx.clone(), false);
+
+    // 自動啟動 MyET (背景檢查 CDP port 9222)
+    let tx_clone = tx.clone();
+    rt.spawn(async move {
+        tokio::time::sleep(TokioDuration::from_millis(500)).await;
+        let cfg = speakdrill_core::Config::load_or_default();
+        let mut attempts = 0;
+        loop {
+            if speakdrill_core::Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
+                let _ = tx_clone.send(Ev::Log("MyET 已連線 (CDP 9222)".into()));
+                break;
+            }
+            attempts += 1;
+            if attempts > 3 {
+                // 啟動 MyET
+                let myet_path = r"C:\Program Files (x86)\LLabs\MyET10\MyET10.exe";
+                if std::path::Path::new(myet_path).exists() {
+                    let _ = Command::new(myet_path)
+                        .args(["--remote-debugging-port=9222", "--remote-allow-origins=*"])
+                        .spawn();
+                    let _ = tx_clone.send(Ev::Log("正在啟動 MyET (debug port 9222)...".into()));
+                    tokio::time::sleep(TokioDuration::from_secs(5)).await;
+                    continue; // 重試連線
+                } else {
+                    let _ = tx_clone.send(Ev::Log("找不到 MyET 執行檔，請手動啟動".into()));
+                    break;
+                }
+            }
+            tokio::time::sleep(TokioDuration::from_secs(2)).await;
+        }
+    });
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();

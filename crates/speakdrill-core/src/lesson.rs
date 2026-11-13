@@ -151,20 +151,41 @@ async fn fetch_catalog_live(cdp: &Cdp, _server: &str, code: &str, content_type: 
 }})()"#
     );
 
-    let json = cdp.eval_string(&js).await?;
-    let rows: Vec<RawRow> = serde_json::from_str(&json).unwrap_or_default();
-    if rows.is_empty() {
-        return Err(anyhow!("抓不到課程，可能沒登入或 CodeName 不對（試試 --refresh 或先登入）"));
+    // Retry logic for "Inspected target navigated or closed" errors
+    let mut last_err = None;
+    for attempt in 1..=3 {
+        match cdp.eval_string(&js).await {
+            Ok(json) => {
+                let rows: Vec<RawRow> = serde_json::from_str(&json).unwrap_or_default();
+                if rows.is_empty() {
+                    last_err = Some(anyhow!("抓不到課程，可能沒登入或 CodeName 不對（試試 --refresh 或先登入）"));
+                    continue;
+                }
+                return Ok(rows
+                    .into_iter()
+                    .map(|r| LessonRef {
+                        lesson_id: r.id,
+                        course_id: r.cid,
+                        title: unescape(&r.title),
+                        best_score: r.score,
+                    })
+                    .collect());
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str.contains("Inspected target navigated or closed") || err_str.contains("target closed") {
+                    last_err = Some(e);
+                    // Wait a bit before retry
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    continue;
+                }
+                last_err = Some(e);
+                break;
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     }
-    Ok(rows
-        .into_iter()
-        .map(|r| LessonRef {
-            lesson_id: r.id,
-            course_id: r.cid,
-            title: unescape(&r.title),
-            best_score: r.score,
-        })
-        .collect())
+    Err(last_err.unwrap_or_else(|| anyhow!("抓取課程失敗，已重試 3 次")))
 }
 
 #[derive(serde::Deserialize)]
