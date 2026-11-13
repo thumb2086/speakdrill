@@ -8,7 +8,7 @@ use crossterm::{
 };
 
 use speakdrill_core::{
-    fetch_all_catalogs, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport, LineScore,
+    run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport, LineScore,
     Progress, RunOptions, Vm,
 };
 use std::process::Command;
@@ -32,6 +32,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 #[derive(Debug, Clone)]
 pub enum Ev {
     Catalog(Vec<LessonRef>),
+    CatalogAppend(Vec<LessonRef>),
     Log(String),
     Score(LineScore),
     LessonStart(String),
@@ -493,6 +494,20 @@ fn apply(app: &mut App, ev: Ev) {
                 app.status = build_status(app);
             }
         }
+        Ev::CatalogAppend(list) => {
+            app.logs.push(format!("+{} 課", list.len()));
+            for l in &list {
+                if !app.lessons.iter().any(|(id, _)| id == &l.lesson_id) {
+                    app.titles.push(l.label());
+                    app.lessons.push((l.lesson_id.clone(), l.course_id.clone()));
+                }
+            }
+            app.sel = app.sel.min(app.lessons.len().saturating_sub(1));
+            app.queue.retain(|id| app.lessons.iter().any(|(l, _)| l == id));
+            if !app.code_select_mode {
+                app.status = build_status(app);
+            }
+        }
         Ev::Log(s) => {
             app.logs.push(s);
             if app.logs.len() > 500 {
@@ -528,18 +543,57 @@ fn apply(app: &mut App, ev: Ev) {
     }
 }
 fn spawn_catalog(rt: &tokio::runtime::Runtime, tx: UnboundedSender<Ev>, refresh: bool) {
+    let _ = tx.send(Ev::Log("spawn_catalog 開始...".into()));
     rt.spawn(async move {
         let cfg = speakdrill_core::Config::load_or_default();
+        let _ = tx.send(Ev::Log(format!("spawn_catalog: code={}, refresh={}", cfg.code, refresh)));
         match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
-            Ok(cdp) => match fetch_all_catalogs(&cdp, &cfg.server, &cfg.content_type, refresh).await
-            {
-                Ok(list) => {
-                    let _ = tx.send(Ev::Catalog(list));
+            Ok(cdp) => {
+                let _ = tx.send(Ev::Log("spawn_catalog: CDP 已連線".into()));
+                // 先載入預設 CodeName（快速，約 1-2 秒）
+                let default_code = cfg.code.clone();
+                let default_name = speakdrill_core::config::KNOWN_CODENAMES
+                    .iter()
+                    .find(|(c, _)| *c == default_code)
+                    .map(|(_, n)| *n)
+                    .unwrap_or("預設");
+                match speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, &default_code, &cfg.content_type, refresh).await {
+                    Ok(mut lessons) => {
+                        let _ = tx.send(Ev::Log(format!("spawn_catalog: fetch_catalog_opts 回傳 {} 課", lessons.len())));
+                        if !lessons.is_empty() {
+                            for lesson in &mut lessons {
+                                lesson.title = format!("{}  [{}]", lesson.title, default_name);
+                            }
+                            let _ = tx.send(Ev::Catalog(lessons));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Ev::Fatal(format!("抓目錄失敗：{e}")));
+                        return;
+                    }
                 }
-                Err(e) => {
-                    let _ = tx.send(Ev::Fatal(format!("抓目錄失敗：{e}")));
+                // 背景載入其餘 CodeName，逐批 append
+                let other_codes: Vec<(&str, &str)> = speakdrill_core::config::KNOWN_CODENAMES
+                    .iter()
+                    .filter(|(c, _)| *c != default_code)
+                    .copied()
+                    .collect();
+                for (code, name) in other_codes {
+                    match speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, code, &cfg.content_type, refresh).await {
+                        Ok(mut lessons) => {
+                            if !lessons.is_empty() {
+                                for lesson in &mut lessons {
+                                    lesson.title = format!("{}  [{}]", lesson.title, name);
+                                }
+                                let _ = tx.send(Ev::CatalogAppend(lessons));
+                            }
+                        }
+                        Err(_) => {
+                            // 忽略無法存取的 CodeName
+                        }
+                    }
                 }
-            },
+            }
             Err(e) => {
                 let _ = tx.send(Ev::Fatal(format!("連不上 MyET：{e}")));
             }
