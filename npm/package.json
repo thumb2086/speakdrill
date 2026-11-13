@@ -1,7 +1,7 @@
 {
   "name": "speakdrill",
-  "version": "0.2.6",
-  "description": "口說課程自動化練習：TTS 產生示範語音、逐句驅動課程演練、輸出分數報告（Rust，含 TUI / 原生 GUI）",
+  "version": "0.2.10",
+  "description": "\u53e3\u8aaa\u8ab2\u7a0b\u81ea\u52d5\u5316\u7df4\u7fd2\uff1aTTS \u7522\u751f\u793a\u7bc4\u8a9e\u97f3\u3001\u9010\u53e5\u9a45\u52d5\u8ab2\u7a0b\u6f14\u7df4\u3001\u8f38\u51fa\u5206\u6578\u5831\u544a\uff08Rust\uff0c\u542b TUI / \u539f\u751f GUI\uff09",
   "keywords": [
     "speaking",
     "shadowing",
@@ -43,9 +43,3 @@
     "x64"
   ]
 }
-
-
-
-
-
-
