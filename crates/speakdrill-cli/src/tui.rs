@@ -264,8 +264,8 @@ fn event_loop(
                     // 正常操作模式
                     match k.code {
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        // Ctrl+C 也能退出
-                        KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return Ok(()),
+                        // Ctrl+C 也能退出 (處理 'c' 和 'C' 都可)
+                        KeyCode::Char('c') | KeyCode::Char('C') if k.modifiers.contains(KeyModifiers::CONTROL) => return Ok(()),
                         KeyCode::Down | KeyCode::Char('j') => {
                             if app.sel + 1 < app.lessons.len() {
                                 app.sel += 1;
@@ -347,7 +347,7 @@ fn event_loop(
                                 start_batch(app, rt, tx.clone(), stop.clone(), picked);
                             }
                         }
-                        KeyCode::Char('b') if !app.running && !app.lessons.is_empty() => {
+                        KeyCode::Char('b') | KeyCode::Char('B') if !app.running && !app.lessons.is_empty() => {
                             let all = app.lessons.clone();
                             start_batch(app, rt, tx.clone(), stop.clone(), all);
                         }
