@@ -8,7 +8,7 @@ use crossterm::{
 };
 
 use speakdrill_core::{
-    run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport, LineScore,
+    fetch_all_catalogs, run_lesson, save_report, AudioPlayer, Cdp, LessonRef, LessonReport, LineScore,
     Progress, RunOptions, Vm,
 };
 use std::process::Command;
@@ -482,6 +482,7 @@ fn start_batch(
 fn apply(app: &mut App, ev: Ev) {
     match ev {
         Ev::Catalog(list) => {
+            app.logs.push(format!("目錄載入：{} 課", list.len()));
             app.titles = list.iter().map(|l| l.label()).collect();
             app.lessons = list.iter().map(|l| (l.lesson_id.clone(), l.course_id.clone())).collect();
             // 選取位置夾回有效範圍（reload 後目錄可能變小）
@@ -530,10 +531,7 @@ fn spawn_catalog(rt: &tokio::runtime::Runtime, tx: UnboundedSender<Ev>, refresh:
     rt.spawn(async move {
         let cfg = speakdrill_core::Config::load_or_default();
         match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
-            Ok(cdp) => match speakdrill_core::lesson::fetch_catalog_opts(
-                &cdp, &cfg.server, &cfg.code, &cfg.content_type, refresh,
-            )
-            .await
+            Ok(cdp) => match fetch_all_catalogs(&cdp, &cfg.server, &cfg.content_type, refresh).await
             {
                 Ok(list) => {
                     let _ = tx.send(Ev::Catalog(list));

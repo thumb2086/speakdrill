@@ -476,13 +476,18 @@ async fn cmd_setup(
 
 async fn cmd_list(code: Option<String>, refresh: bool) -> Result<()> {
     let mut cfg = Config::load_or_default();
+    let has_code = code.is_some();
     if let Some(c) = code {
         cfg.code = c;
     }
     let cdp = Cdp::connect("127.0.0.1", cfg.cdp_port).await?;
     ensure_logged_in(&cdp, &cfg.server).await?;
-    let all = speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, &cfg.code, &cfg.content_type, refresh).await?;
-    println!("{} 課（CodeName={}）\n", all.len(), cfg.code);
+    let all = if has_code {
+        speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, &cfg.code, &cfg.content_type, refresh).await?
+    } else {
+        speakdrill_core::lesson::fetch_all_catalogs(&cdp, &cfg.server, &cfg.content_type, refresh).await?
+    };
+    println!("{} 課（{}）\n", all.len(), if has_code { cfg.code.clone() } else { "所有課本".to_string() });
     for (i, l) in all.iter().enumerate() {
         println!("{:3}. {}", i + 1, l.label());
     }

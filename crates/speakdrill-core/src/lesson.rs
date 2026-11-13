@@ -103,14 +103,16 @@ pub async fn fetch_all_catalogs(
     for (code, name) in KNOWN_CODENAMES {
         match fetch_catalog_opts(cdp, server, code, content_type, refresh).await {
             Ok(mut lessons) => {
-                // 為每個課程加上 CodeName 標記
-                for lesson in &mut lessons {
-                    lesson.title = format!("{}  [{}]", lesson.title, name);
+                if !lessons.is_empty() {
+                    // 為每個課程加上 CodeName 標記
+                    for lesson in &mut lessons {
+                        lesson.title = format!("{}  [{}]", lesson.title, name);
+                    }
+                    all_lessons.extend(lessons);
                 }
-                all_lessons.extend(lessons);
             }
-            Err(e) => {
-                eprintln!("CodeName {} ({}) 抓取失敗: {}", code, name, e);
+            Err(_) => {
+                // 忽略無法存取的 CodeName（使用者可能無權限）
             }
         }
     }
