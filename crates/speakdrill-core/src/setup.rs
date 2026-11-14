@@ -247,7 +247,16 @@ pub fn run_setup(opts: &SetupOptions, log: &mut dyn FnMut(String)) -> Result<()>
     let expected_mic = crate::winvol::find_endpoint_id(&route.mic_device, true);
     let mic_ok = || -> bool {
         match (&expected_mic, crate::binding::app_mic_binding(&cfg.app_exe)) {
-            (Some(exp), Some(b)) => b.any_matches(exp),
+            (Some(exp), Some(b)) => {
+                // 檢查 Multimedia role (001_001) 是否已綁定，這才是 MyET 實際使用的 role
+                if let Some((_, v)) = b.mic_roles.iter().find(|(k, _)| k == "001_001") {
+                    if let Some(g) = crate::binding::extract_guid(v) {
+                        return g.eq_ignore_ascii_case(exp);
+                    }
+                }
+                // 如果 001_001 不存在，fallback 到 any_matches
+                b.any_matches(exp)
+            }
             _ => false,
         }
     };

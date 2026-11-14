@@ -135,7 +135,7 @@ type RawFn = unsafe extern "system" fn(*mut c_void) -> HRESULT;
 
         let f = Factory::activate()?;
         let flow = if capture { 1 } else { 0 };
-        for role in [1, 0] { // eMultimedia，再 eConsole
+        for role in [0, 1, 2] { // eConsole, eMultimedia, eCommunications
             f.set(pid, flow, role, &token)?;
         }
         Ok(())

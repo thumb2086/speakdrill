@@ -103,7 +103,7 @@ fn inspect_chunk(needle: &str, key: &str, chunk: &str) -> Option<AppBinding> {
 }
 
 /// 從 `\\?\SWD#MMDEVAPI#{0.0.0.00000000}.{guid}#{iface}` 取出 `{0.0.0...}.{guid}`
-fn extract_guid(path: &str) -> Option<String> {
+pub fn extract_guid(path: &str) -> Option<String> {
     let start = path.find("{0.0.")?;
     let after_dot = &path[start..];
 
