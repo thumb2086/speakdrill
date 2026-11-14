@@ -151,8 +151,8 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         prev_status: String::new(),
     };
 
-    // 背景載入目錄
-    spawn_catalog(&rt, tx.clone(), false);
+    // 背景載入目錄（延後到 MyET 連線後由 auto-start task 呼叫）
+    // spawn_catalog(&rt, tx.clone(), false);
 
     // 背景檢查 MyET（CDP port 連線）；未連線時只啟動一次並等待 CDP 起來
     let tx_clone = tx.clone();
@@ -163,6 +163,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
 
         if speakdrill_core::Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
             let _ = tx_clone.send(Ev::Log(format!("MyET 已連線 (CDP {})", cfg.cdp_port)));
+            spawn_catalog(tx_clone.clone(), false);
             return;
         }
 
@@ -183,6 +184,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
             tokio::time::sleep(TokioDuration::from_secs(1)).await;
             if speakdrill_core::Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
                 let _ = tx_clone.send(Ev::Log(format!("MyET 已連線 (CDP {})", cfg.cdp_port)));
+                spawn_catalog(tx_clone.clone(), false);
                 return;
             }
         }
@@ -263,7 +265,7 @@ fn event_loop(
                                 if app.status.is_empty() {
                                     app.status = build_status(app);
                                 }
-                                spawn_catalog(rt, tx.clone(), true);
+                                spawn_catalog(tx.clone(), true);
                                 // 其餘選中的加入佇列
                                 for &idx in &selected {
                                     if idx != first_idx {
@@ -336,7 +338,7 @@ fn event_loop(
                         }
                         KeyCode::Char('r') if !app.running => {
                             app.logs.push("... 重新載入目錄".into());
-                            spawn_catalog(rt, tx.clone(), true);
+                            spawn_catalog(tx.clone(), true);
                         }
                         // m 鍵：手動啟動 MyET（含 debug port，只啟動一次）
                         KeyCode::Char('m') if !app.running => {
@@ -503,7 +505,6 @@ fn apply(app: &mut App, ev: Ev) {
             }
         }
         Ev::CatalogAppend(list) => {
-            app.logs.push(format!("+{} 課", list.len()));
             for l in &list {
                 if l.best_score.is_some() {
                     app.completed.insert(l.lesson_id.clone());
@@ -571,9 +572,10 @@ fn apply(app: &mut App, ev: Ev) {
         }
     }
 }
-fn spawn_catalog(rt: &tokio::runtime::Runtime, tx: UnboundedSender<Ev>, refresh: bool) {
+fn spawn_catalog(tx: UnboundedSender<Ev>, refresh: bool) {
+    // Use tokio::spawn since we're called from within a tokio runtime context
     let _ = tx.send(Ev::Log("spawn_catalog 開始...".into()));
-    rt.spawn(async move {
+    tokio::spawn(async move {
         let cfg = speakdrill_core::Config::load_or_default();
         let _ = tx.send(Ev::Log(format!("spawn_catalog: code={}, refresh={}", cfg.code, refresh)));
         match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
