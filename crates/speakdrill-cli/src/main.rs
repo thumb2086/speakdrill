@@ -194,6 +194,11 @@ async fn cmd_init(
         println!("  提示：VB-CABLE 已安裝但開不起來，重開機後再跑一次 init 就會切過去");
     }
 
+    let mic_device_hint = match &chosen {
+        Some(r) => r.mic_device.clone(),
+        None => "Voicemeeter Out B1".to_string(),
+    };
+
     match chosen {
         Some(r) => {
             cfg.play_device = r.play_device.clone();
@@ -231,9 +236,12 @@ async fn cmd_init(
     println!("\n[4/5] Windows 裝置音量");
     #[cfg(windows)]
     {
-        match speakdrill_core::winvol::set_volume("Voicemeeter Out B1", true, 1.0) {
-            Ok(n) => println!("  錄音裝置 B1：{n} 個已設 100%"),
-            Err(e) => println!("  ⚠ B1 音量：{e}"),
+        // 只在 VoiceMeeter 路線時設定 B1 音量
+        if cfg.play_device.to_lowercase().contains("voicemeeter") {
+            match speakdrill_core::winvol::set_volume("Voicemeeter Out B1", true, 1.0) {
+                Ok(n) => println!("  錄音裝置 B1：{n} 個已設 100%"),
+                Err(e) => println!("  ⚠ B1 音量：{e}"),
+            }
         }
         match speakdrill_core::winvol::set_volume(&cfg.play_device, false, 1.0) {
             Ok(n) => println!("  播放裝置：{n} 個已設 100%"),
@@ -250,7 +258,7 @@ async fn cmd_init(
     println!("還剩一步（Windows 只允許用介面設定）：");
     println!("  1. Win+R → ms-settings:apps-volume");
     println!("  2. 找到「English-Chinese-Japanese」（就是 MyET）並展開");
-    println!("  3. 輸入裝置 → 選「Voicemeeter Out B1」");
+    println!("  3. 輸入裝置 → 選「{}」", mic_device_hint);
     println!("  （輸出裝置可留原值；全域預設麥克風不用改）");
     println!("{}", "─".repeat(64));
     Ok(())
