@@ -81,6 +81,8 @@ struct App {
     coursebooks: Vec<(String, String, Vec<(String, String)>)>,
     /// 佇列：課本索引
     queue: HashSet<usize>,
+    /// 已完成的課程 ID
+    completed: HashSet<String>,
     titles: Vec<String>,
     sel: usize,
     logs: Vec<String>,
@@ -132,6 +134,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         lessons: Vec::new(),
         coursebooks: Vec::new(),
         queue: HashSet::new(),
+        completed: HashSet::new(),
         titles: Vec::new(),
         sel: 0,
         logs: Vec::new(),
@@ -462,6 +465,12 @@ fn apply(app: &mut App, ev: Ev) {
         Ev::Catalog(list) => {
             app.logs.push(format!("目錄載入：{} 課", list.len()));
             app.lessons = list.iter().map(|l| (l.lesson_id.clone(), l.course_id.clone())).collect();
+            // 追蹤已完成的課程
+            for l in &list {
+                if l.best_score.is_some() {
+                    app.completed.insert(l.lesson_id.clone());
+                }
+            }
             // 按 course_id 前綴分組為課本
             app.coursebooks.clear();
             for l in &list {
@@ -496,6 +505,9 @@ fn apply(app: &mut App, ev: Ev) {
         Ev::CatalogAppend(list) => {
             app.logs.push(format!("+{} 課", list.len()));
             for l in &list {
+                if l.best_score.is_some() {
+                    app.completed.insert(l.lesson_id.clone());
+                }
                 let parts: Vec<&str> = l.course_id.split('-').collect();
                 let cb_key = if parts.len() >= 2 {
                     format!("{}-{}", parts[0], parts[1])
@@ -541,6 +553,7 @@ fn apply(app: &mut App, ev: Ev) {
         }
         Ev::LessonStart(l) => app.logs.push(format!("=== {l} ===")),
         Ev::LessonDone(r) => {
+            app.completed.insert(r.lesson_id.clone());
             app.logs.push(format!(
                 "✓ {} 平均 {} （{} 句 / {} 秒）",
                 r.lesson_id, r.avg, r.lines.len(), r.elapsed_secs
@@ -644,8 +657,11 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
         .iter()
         .enumerate()
         .map(|(i, (code, name, lessons))| {
+            let total = lessons.len();
+            let done = lessons.iter().filter(|(id, _)| app.completed.contains(id)).count();
+            let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u32 } else { 0 };
             let mark = if app.queue.contains(&i) { "●" } else { " " };
-            ListItem::new(TLine::from(format!("{} {}  {}  ({} 課)", mark, code, name, lessons.len())))
+            ListItem::new(TLine::from(format!("{} {}  {}  {}/{} ({:.0}%)", mark, code, name, done, total, pct)))
                 .style(if app.queue.contains(&i) {
                     Style::default().fg(Color::Yellow)
                 } else {
