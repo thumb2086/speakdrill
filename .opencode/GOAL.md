@@ -69,5 +69,11 @@
   - v0.2.24 CI (run 43713130408)：verify/build/npm 全部通過；`npm i -g speakdrill@latest` → v0.2.24；`speakdrill doctor` 全部正常
   - 實測 BKM-GAR-2A001 9/9 平均 91.2；TUI 實測 21 句平均 90.0
   - 使用者確認：「確定對了，沒錯了」
+- [2026-11-15] checkpoint9：v0.2.25 發布（TUI/GUI 重構）✅
+  - TUI：移除 `c` 切換課本（popup、code_select_* 狀態）；修正 ↑/↓ 邊界誤用 lessons.len() 的 bug；push_log 500 行上限涵蓋所有事件；merge_catalog/group_lesson 消除重複分組；編譯 0 warning；wrap_text 測試 4/4
+  - GUI：改為與 TUI 相同——啟動自動檢查/啟動 MyET、全部課本 + 完成率、勾選加入佇列；視窗 1340x720；CodeName 清單改用 core KNOWN_CODENAMES；修正下拉顯示 1A 但清單是 2A 的不一致；500 行 log 上限
+  - README：硬體需求章節、移除 c 與不存在的 Shift+Space 說明
+  - v0.2.25 CI (run 43748327579)：verify/build/npm 全部通過；`npm i -g speakdrill@latest` → v0.2.25；`doctor` 全部正常
+  - 使用者確認：「我覺得ok了」→ 發 v0.2.25
 - Status: completed
-- Updated: 2026-11-15T12:30:00+08:00
+- Updated: 2026-11-15T18:55:00+08:00
