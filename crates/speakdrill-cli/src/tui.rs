@@ -16,10 +16,10 @@ use tokio::time::Duration as TokioDuration;
 
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line as TLine, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Terminal,
 };
 
@@ -55,6 +55,14 @@ impl Progress for ChannelProgress {
     }
     fn should_stop(&self) -> bool {
         self.stop.load(Ordering::Relaxed)
+    }
+}
+
+/// 推一行 log，並把紀錄上限維持在 500 行
+fn push_log(app: &mut App, s: String) {
+    app.logs.push(s);
+    if app.logs.len() > 500 {
+        app.logs.remove(0);
     }
 }
 
@@ -124,7 +132,7 @@ fn build_status(app: &App) -> String {
         "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into()
     } else {
         format!(
-            "{} 本課本（{}）  ↑/↓ 移動 · Space 選取 · Enter 執行（{}）· a 全選 · x 清空 · b 全部 · PgUp/PgDn 捲動紀錄 · End 回最新 · c 切換課本 · q 離開",
+            "{} 本課本（{}）  ↑/↓ 移動 · Space 選取 · Enter 執行（{}）· a 全選 · x 清空 · b 全部 · PgUp/PgDn 捲動紀錄 · End 回最新 · q 離開",
             app.coursebooks.len(),
             if queued > 0 { format!("已勾 {queued} 本") } else { "Enter 跑單一課本".to_string() },
             if queued > 0 { "佇列" } else { "選取" },
@@ -142,53 +150,19 @@ struct App {
     queue: HashSet<usize>,
     /// 已完成的課程 ID
     completed: HashSet<String>,
-    titles: Vec<String>,
     sel: usize,
     logs: Vec<String>,
     running: bool,
-    stop: Arc<AtomicBool>,
-    tx: UnboundedSender<Ev>,
     total_done: usize,
     avg_sum: f64,
     avg_n: usize,
     status: String,
-    /// CodeName 選單模式
-    code_select_mode: bool,
-    code_select_idx: usize,
-    code_select_selected: HashSet<usize>,
-    /// 儲存開啟 CodeName 選單前的 status，關閉時恢復
-    prev_status: String,
     /// 紀錄面板：從最新往回捲的行數（0 = 跟隨最新輸出）
     log_scroll: usize,
     /// 紀錄面板可見行數（draw 時更新，供 PgUp/PgDn 翻頁用）
     log_page: usize,
 }
 
-/// 常見 CodeName 清單（可依需求增減）
-fn known_codenames() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("BKM_1A", "書林美語走天下-1A"),
-        ("BKM_1B", "書林美語走天下-1B"),
-        ("BKM_2A", "書林美語走天下-2A"),
-        ("BKM_2B", "書林美語走天下-2B"),
-        ("BKM_3A", "書林美語走天下-3A"),
-        ("BKM_3B", "書林美語走天下-3B"),
-        ("BKM_GAR_1A", "Getting Around in American English 1A"),
-        ("BKM_GAR_2A", "Getting Around in American English 2A"),
-        ("BKM_AME_1A", "American English 1A"),
-        ("BKM_MBA_SALES", "MBA 英語-銷售管理"),
-        ("BKM_MBA_PROD", "MBA 英語-生產管理"),
-        ("BKM_MBA_FIN", "MBA 英語-財務管理"),
-        ("BKM_MBA_HR", "MBA 英語-人資管理"),
-        ("BKM_MBA_MKT", "MBA 英語-行銷管理"),
-        ("BKM_MBA_RD", "MBA 英語-研發管理"),
-        ("BKM_MICE", "MICE 英語"),
-        ("BKM_TOEIC_1", "多益口說測驗攻略 Part 1"),
-        ("BKM_TOEIC_2", "多益口說測驗攻略 Part 2"),
-        ("BKM_TOEIC_3", "多益口說測驗攻略 Part 3"),
-        ("BKM_TOEIC_SP", "TOEIC Speaking"),
-    ]
-}
 pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
     let (tx, rx) = unbounded_channel::<Ev>();
     let stop = Arc::new(AtomicBool::new(false));
@@ -198,26 +172,16 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         coursebooks: Vec::new(),
         queue: HashSet::new(),
         completed: HashSet::new(),
-        titles: Vec::new(),
         sel: 0,
         logs: Vec::new(),
         running: false,
-        stop: stop.clone(),
-        tx: tx.clone(),
         total_done: 0,
         avg_sum: 0.0,
         avg_n: 0,
         status: "載入目錄中…".into(),
-        code_select_mode: false,
-        code_select_idx: 0,
-        code_select_selected: HashSet::new(),
-        prev_status: String::new(),
         log_scroll: 0,
         log_page: 10,
     };
-
-    // 背景載入目錄（延後到 MyET 連線後由 auto-start task 呼叫）
-    // spawn_catalog(&rt, tx.clone(), false);
 
     // 背景檢查 MyET（CDP port 連線）；未連線時只啟動一次並等待 CDP 起來
     let tx_clone = tx.clone();
@@ -292,87 +256,13 @@ fn event_loop(
                 if k.kind != KeyEventKind::Press {
                     continue;
                 }
-                if app.code_select_mode {
-                    // CodeName 下拉選單模式
-                    let codenames = known_codenames();
-                    // 開啟選單時先 clamp idx，避免 reload 後陣列變小導致越界
-                    if app.code_select_idx >= codenames.len() {
-                        app.code_select_idx = codenames.len().saturating_sub(1);
-                    }
-                    match k.code {
-                        KeyCode::Esc => {
-                            // 恢復之前的 status
-                            app.code_select_mode = false;
-                            app.code_select_idx = 0;
-                            app.status = std::mem::take(&mut app.prev_status);
-                            if app.status.is_empty() {
-                                app.status = build_status(app);
-                            }
-                        }
-                        // Ctrl+C 在選單中也能退出
-                        KeyCode::Char('c') | KeyCode::Char('C') if k.modifiers.contains(KeyModifiers::CONTROL) => return Ok(()),
-                        KeyCode::Enter => {
-                            let mut selected = app.code_select_selected.clone();
-                            if selected.is_empty() {
-                                selected.insert(app.code_select_idx);
-                            }
-                            // 先切換到第一個並 reload
-                            if let Some(&first_idx) = selected.iter().next() {
-                                let (code, name) = codenames[first_idx];
-                                let mut cfg = speakdrill_core::Config::load_or_default();
-                                cfg.code = code.to_string();
-                                cfg.save().ok();
-                                app.logs.push(format!("已切換課本：{}（{}），重新載入目錄…", name, code));
-                                app.code_select_mode = false;
-                                app.code_select_idx = 0;
-                                app.code_select_selected.clear();
-                                app.status = std::mem::take(&mut app.prev_status);
-                                if app.status.is_empty() {
-                                    app.status = build_status(app);
-                                }
-                                spawn_catalog(tx.clone(), true);
-                                // 其餘選中的加入佇列
-                                for &idx in &selected {
-                                    if idx != first_idx {
-                                        let (code, _name) = codenames[idx];
-                                        // 找到對應的課本索引
-                                        let cb_prefix = code.replace('_', "-B").replace("BKM-B", "BKM-B");
-                                        if let Some(cb_idx) = app.coursebooks.iter().position(|(c, _, _)| c == &cb_prefix) {
-                                            app.queue.insert(cb_idx);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // Space：切換多選
-                        KeyCode::Char(' ') => {
-                            if app.code_select_selected.contains(&app.code_select_idx) {
-                                app.code_select_selected.remove(&app.code_select_idx);
-                            } else {
-                                app.code_select_selected.insert(app.code_select_idx);
-                            }
-                        }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            // 使用 checked_add 避免溢位
-                            if let Some(next) = app.code_select_idx.checked_add(1) {
-                                if next < codenames.len() {
-                                    app.code_select_idx = next;
-                                }
-                            }
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            app.code_select_idx = app.code_select_idx.saturating_sub(1);
-                        }
-                        _ => {}
-                    }
-                } else {
                     // 正常操作模式
                     match k.code {
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                         // Ctrl+C 也能退出 (處理 'c' 和 'C' 都可)
                         KeyCode::Char('c') | KeyCode::Char('C') if k.modifiers.contains(KeyModifiers::CONTROL) => return Ok(()),
                         KeyCode::Down | KeyCode::Char('j') => {
-                            if app.sel + 1 < app.lessons.len() {
+                            if app.sel + 1 < app.coursebooks.len() {
                                 app.sel += 1;
                             }
                         }
@@ -402,40 +292,40 @@ fn event_loop(
                         }
                         KeyCode::Char('x') if !app.queue.is_empty() => {
                             app.queue.clear();
-                            app.logs.push("(已清空佇列)".into());
+                            push_log(app, "(已清空佇列)".into());
                         }
                         KeyCode::Char('a') if !app.coursebooks.is_empty() => {
                             let all: HashSet<usize> = (0..app.coursebooks.len()).collect();
                             if app.queue.len() == all.len() {
                                 app.queue.clear();
-                                app.logs.push("(取消全選)".into());
+                                push_log(app, "(取消全選)".into());
                             } else {
                                 app.queue = all;
-                                app.logs.push("(已全選)".into());
+                                push_log(app, "(已全選)".into());
                             }
                         }
                         KeyCode::Char('r') if !app.running => {
-                            app.logs.push("... 重新載入目錄".into());
+                            push_log(app, "... 重新載入目錄".into());
                             spawn_catalog(tx.clone(), true);
                         }
                         // m 鍵：手動啟動 MyET（含 debug port，只啟動一次）
                         KeyCode::Char('m') if !app.running => {
-                            app.logs.push("... 正在啟動 MyET".into());
+                            push_log(app, "... 正在啟動 MyET".into());
                             let myet_path = std::env::var("SPEAKDRILL_MYET_PATH")
                                 .unwrap_or_else(|_| r"C:\Program Files (x86)\LLabs\MyET10\MyET10.exe".to_string());
                             if !std::path::Path::new(&myet_path).exists() {
-                                app.logs.push("找不到 MyET 執行檔".into());
+                                push_log(app, "找不到 MyET 執行檔".into());
                             } else {
                                 let port_str = speakdrill_core::Config::load_or_default().cdp_port.to_string();
                                 let _ = std::process::Command::new(&myet_path)
                                     .args([format!("--remote-debugging-port={}", port_str), "--remote-allow-origins=*".to_string()])
                                     .spawn();
-                                app.logs.push(format!("MyET 已啟動 (debug port {})，等待 CDP 連線...", port_str));
+                                push_log(app, format!("MyET 已啟動 (debug port {})，等待 CDP 連線...", port_str));
                             }
                         }
                         KeyCode::Char('s') => {
                             stop.store(true, Ordering::Relaxed);
-                            app.logs.push("... 請求中止".into());
+                            push_log(app, "... 請求中止".into());
                         }
                         KeyCode::Enter if !app.running && !app.coursebooks.is_empty() => {
                             // 把選中的課本展開為 lessons
@@ -451,7 +341,7 @@ fn event_loop(
                                 }
                             }
                             if picked.is_empty() {
-                                app.logs.push("(佇列與目錄對不上，請按 r 重新載入)".into());
+                                push_log(app, "(佇列與目錄對不上，請按 r 重新載入)".into());
                             } else {
                                 start_batch(app, rt, tx.clone(), stop.clone(), picked);
                             }
@@ -460,17 +350,8 @@ fn event_loop(
                             let all = app.lessons.clone();
                             start_batch(app, rt, tx.clone(), stop.clone(), all);
                         }
-                        // CodeName 切換：c 開啟下拉選單
-                        KeyCode::Char('c') if !app.running => {
-                            // 儲存目前 status，以便關閉選單時恢復
-                            app.prev_status = std::mem::take(&mut app.status);
-                            app.code_select_mode = true;
-                            app.code_select_idx = 0;
-                            app.status = "選擇課本（↑/↓ 選擇，Enter 確認，Esc 取消）".into();
-                        }
                         _ => {}
                     }
-                }
             }
         }
     }
@@ -540,89 +421,58 @@ fn start_batch(
         let _ = tx.send(Ev::BatchDone);
     });
 }
+/// 依 course_id 前綴把課程分組為課本；replace=true 時先清空重建（重載目錄用）
+fn merge_catalog(app: &mut App, list: Vec<LessonRef>, replace: bool) {
+    if replace {
+        push_log(app, format!("目錄載入：{} 課", list.len()));
+        app.coursebooks.clear();
+        app.lessons = list
+            .iter()
+            .map(|l| (l.lesson_id.clone(), l.course_id.clone()))
+            .collect();
+    }
+    for l in &list {
+        if l.best_score.is_some() {
+            app.completed.insert(l.lesson_id.clone());
+        }
+        if !replace {
+            if !app.lessons.iter().any(|(id, _)| id == &l.lesson_id) {
+                app.lessons.push((l.lesson_id.clone(), l.course_id.clone()));
+            }
+        }
+        // 按 course_id 前綴分組為課本（例：BKM-B2A-001 → BKM-B2A）
+        let parts: Vec<&str> = l.course_id.split('-').collect();
+        let cb_key = if parts.len() >= 2 {
+            format!("{}-{}", parts[0], parts[1])
+        } else {
+            l.course_id.clone()
+        };
+        let cb_name = speakdrill_core::config::KNOWN_CODENAMES
+            .iter()
+            .find(|(code, _)| code.replace('_', "-B") == cb_key)
+            .map(|(_, name)| name.to_string())
+            .unwrap_or_else(|| cb_key.clone());
+        if let Some(cb) = app.coursebooks.iter_mut().find(|(c, _, _)| c == &cb_key) {
+            if !cb.2.iter().any(|(id, _)| id == &l.lesson_id) {
+                cb.2.push((l.lesson_id.clone(), l.course_id.clone()));
+            }
+        } else {
+            app.coursebooks.push((cb_key, cb_name, vec![(l.lesson_id.clone(), l.course_id.clone())]));
+        }
+    }
+    // queue 保留索引，超出範圍的夾掉
+    app.queue.retain(|&i| i < app.coursebooks.len());
+    app.sel = app.sel.min(app.coursebooks.len().saturating_sub(1));
+    app.status = build_status(app);
+}
+
 fn apply(app: &mut App, ev: Ev) {
     match ev {
-        Ev::Catalog(list) => {
-            app.logs.push(format!("目錄載入：{} 課", list.len()));
-            app.lessons = list.iter().map(|l| (l.lesson_id.clone(), l.course_id.clone())).collect();
-            // 追蹤已完成的課程
-            for l in &list {
-                if l.best_score.is_some() {
-                    app.completed.insert(l.lesson_id.clone());
-                }
-            }
-            // 按 course_id 前綴分組為課本
-            app.coursebooks.clear();
-            for l in &list {
-                let parts: Vec<&str> = l.course_id.split('-').collect();
-                let cb_key = if parts.len() >= 2 {
-                    format!("{}-{}", parts[0], parts[1])
-                } else {
-                    l.course_id.clone()
-                };
-                let cb_name = speakdrill_core::config::KNOWN_CODENAMES
-                    .iter()
-                    .find(|(code, _)| code.replace('_', "-B") == cb_key)
-                    .map(|(_, name)| name.to_string())
-                    .unwrap_or_else(|| cb_key.clone());
-                if let Some(cb) = app.coursebooks.iter_mut().find(|(c, _, _)| c == &cb_key) {
-                    if !cb.2.iter().any(|(id, _)| id == &l.lesson_id) {
-                        cb.2.push((l.lesson_id.clone(), l.course_id.clone()));
-                    }
-                } else {
-                    app.coursebooks.push((cb_key, cb_name, vec![(l.lesson_id.clone(), l.course_id.clone())]));
-                }
-            }
-            // 重新計算 queue（保留已選的課本索引）
-            app.queue.retain(|&i| i < app.coursebooks.len());
-            // 選取位置夾回有效範圍
-            app.sel = app.sel.min(app.coursebooks.len().saturating_sub(1));
-            // 更新 status
-            if !app.code_select_mode {
-                app.status = build_status(app);
-            }
-        }
-        Ev::CatalogAppend(list) => {
-            for l in &list {
-                if l.best_score.is_some() {
-                    app.completed.insert(l.lesson_id.clone());
-                }
-                let parts: Vec<&str> = l.course_id.split('-').collect();
-                let cb_key = if parts.len() >= 2 {
-                    format!("{}-{}", parts[0], parts[1])
-                } else {
-                    l.course_id.clone()
-                };
-                let cb_name = speakdrill_core::config::KNOWN_CODENAMES
-                    .iter()
-                    .find(|(code, _)| code.replace('_', "-B") == cb_key)
-                    .map(|(_, name)| name.to_string())
-                    .unwrap_or_else(|| cb_key.clone());
-                if let Some(cb) = app.coursebooks.iter_mut().find(|(c, _, _)| c == &cb_key) {
-                    if !cb.2.iter().any(|(id, _)| id == &l.lesson_id) {
-                        cb.2.push((l.lesson_id.clone(), l.course_id.clone()));
-                    }
-                } else {
-                    app.coursebooks.push((cb_key, cb_name, vec![(l.lesson_id.clone(), l.course_id.clone())]));
-                }
-                if !app.lessons.iter().any(|(id, _)| id == &l.lesson_id) {
-                    app.lessons.push((l.lesson_id.clone(), l.course_id.clone()));
-                }
-            }
-            app.sel = app.sel.min(app.coursebooks.len().saturating_sub(1));
-            app.queue.retain(|&i| i < app.coursebooks.len());
-            if !app.code_select_mode {
-                app.status = build_status(app);
-            }
-        }
-        Ev::Log(s) => {
-            app.logs.push(s);
-            if app.logs.len() > 500 {
-                app.logs.remove(0);
-            }
-        }
+        Ev::Catalog(list) => merge_catalog(app, list, true),
+        Ev::CatalogAppend(list) => merge_catalog(app, list, false),
+        Ev::Log(s) => push_log(app, s),
         Ev::Score(s) => {
-            app.logs.push(format!(
+            push_log(app, format!(
                 "  #{} {} 分（發音 {} 語調 {} 流利 {} 重音 {}）",
                 s.index, s.total, s.pronunciation, s.pitch, s.fluency, s.stress
             ));
@@ -630,10 +480,10 @@ fn apply(app: &mut App, ev: Ev) {
             app.avg_sum += s.total as f64;
             app.avg_n += 1;
         }
-        Ev::LessonStart(l) => app.logs.push(format!("=== {l} ===")),
+        Ev::LessonStart(l) => push_log(app, format!("=== {l} ===")),
         Ev::LessonDone(r) => {
             app.completed.insert(r.lesson_id.clone());
-            app.logs.push(format!(
+            push_log(app, format!(
                 "✓ {} 平均 {} （{} 句 / {} 秒）",
                 r.lesson_id, r.avg, r.lines.len(), r.elapsed_secs
             ));
@@ -646,7 +496,7 @@ fn apply(app: &mut App, ev: Ev) {
         Ev::Fatal(e) => {
             app.running = false;
             app.status = e.clone();
-            app.logs.push(format!("✗ {e}"));
+            push_log(app, format!("✗ {e}"));
         }
     }
 }
@@ -786,64 +636,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     let log = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(log_title));
     f.render_widget(log, body[1]);
 
-    let footer_text = if app.code_select_mode {
-        format!("選擇課本（↑/↓ 選擇，Space 多選，Enter 套用，Esc 取消） — 已選 {} 本", app.code_select_selected.len())
-    } else {
-        app.status.clone()
-    };
-    let footer = Paragraph::new(footer_text)
+    let footer = Paragraph::new(app.status.clone())
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(footer, chunks[2]);
-
-    // CodeName 下拉選單彈窗
-    if app.code_select_mode {
-        let codenames = known_codenames();
-        // 渲染前再 clamp 一次，確保 index 有效
-        let clamped_idx = app.code_select_idx.min(codenames.len().saturating_sub(1));
-        let items: Vec<ListItem> = codenames
-            .iter()
-            .enumerate()
-            .map(|(i, (code, name))| {
-                let selected_mark = if app.code_select_selected.contains(&i) { "☑ " } else { "☐ " };
-                let style = if i == clamped_idx {
-                    Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
-                ListItem::new(TLine::from(format!("{} {}  {}", selected_mark, code, name))).style(style)
-            })
-            .collect();
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("選擇課本 (CodeName) — Space 多選，Enter 套用"))
-            .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
-        let mut st = ListState::default();
-        st.select(Some(clamped_idx));
-
-        // 計算彈窗區域（置中，寬 70%，高 80%）
-        let area = centered_rect(70, 80, f.area());
-        f.render_widget(Clear, area); // 清除背景
-        f.render_stateful_widget(list, area, &mut st);
-    }
 }
-/// 計算置中矩形（百分比寬高）
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}
-
-
-

@@ -1,0 +1,23 @@
+refactor: TUI 移除 c 切換課本並最佳化；GUI 改為與 TUI 相同的課本佇列介面
+
+TUI：
+- 移除 `c` 課本切換選單（popup、code_select_* 狀態、prev_status、known_codenames 複製清單）
+- 修正 ↑/↓ 移動邊界用 lessons.len() 導致選取跑到課本清單外的 bug（改 coursebooks.len()）
+- 下拉選單刪除後，Enter 行為不變（佇列優先，否則跑選取課本）
+- 抽出 push_log（500 行上限），Score/LessonDone/Fatal 等非 Log 事件也會被截斷
+- 抽出 merge_catalog 消除 Catalog/CatalogAppend 的重複分組邏輯；catalog 換載入時 status 直接重建
+- 刪除未使用的 centered_rect 與未使用的 dead code（titles/stop/tx），編譯 0 warning
+- wrap_text 單元測試維持 4/4 通過
+
+GUI：
+- 改為與 TUI 相同：啟動自動檢查/啟動 MyET（最多等 20 秒）、載入全部課本、
+  左側課本清單顯示完成率（done/total 與百分比），勾選加入佇列（● 黃色高亮）
+- 按鈕：▶ 跑選取（整本課本）、▶ 跑佇列（N）、✖ 清佇列、▶▶ 跑全部、■ 停止、
+  🔄 重新載入（refresh）、🔧 自動設定音訊、及格分滑桿
+- 移除課本下拉選單與「➕ 加入整課程」（與 TUI 相同：所有課本一次列出）
+- 視窗 1340x720（min 1280x600），避免頂部工具列被裁切；課本清單預設寬 360
+- merge_catalog/group_lesson 與 TUI 相同的分組邏輯；500 行 log 上限
+- GUI 的 CodeName 清單改用 speakdrill_core::config::KNOWN_CODENAMES（消除 8 項與 20 項不一致）
+- 修正下拉選單顯示課本與實際載入目錄不一致的 bug（先前下拉顯示 1A 但清單是 2A）
+
+README：移除 `c` 切換課本與不存在的 Shift+Space 說明，更新 TUI 按鍵描述
