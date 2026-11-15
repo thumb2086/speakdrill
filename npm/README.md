@@ -6,6 +6,18 @@ Rust 實作，含 CLI、TUI 與原生 GUI（egui，不是 Electron / Tauri webvi
 
 > 目前只支援 **Windows x64**。可選用 **VB-CABLE**（零設定、自動安裝）或 **VoiceMeeter**（Banana/Potato）。
 
+## 硬體需求
+
+**不高。** speakdrill 本體只是單一 Rust 執行檔（記憶體約 20 MB 級），真正吃資源的是 MyET 課程 App 本身（CEF，多程序合計約 0.7 GB）。能順跑 MyET，就能順跑 speakdrill。
+
+- OS：Windows 10 / 11（64-bit）
+- CPU：雙核心即可（Piper TTS 與音訊全走 CPU，不需要 GPU）
+- RAM：4 GB 以上
+- 磁碟：約 100 MB（程式 + Piper 聲音檔 ~82 MB）＋ 少量 TTS 快取
+- 需要虛擬音效驅動（VB-CABLE 1.3 MB 或 VoiceMeeter ~30 MB），安裝後**必須重開機**
+- 安裝驅動與 per-app 麥克風綁定需要管理員權限（UAC）
+- 需要 MyET10 已安裝，TUI 會以 `--remote-debugging-port=9222 --remote-allow-origins=*` 自動啟動
+
 ## 安裝
 
 ```bash

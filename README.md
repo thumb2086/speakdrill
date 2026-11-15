@@ -43,6 +43,29 @@ TTS（Piper）播放 ──▶ CABLE Input（播放裝置）
 
 ---
 
+## 硬體需求
+
+**不高。** speakdrill 本身只是單一 Rust 執行檔，真正吃資源的是 MyET 課程 App 本身（CEF，常駐多個程序）。
+
+| 項目 | 最低建議 | 實測機器（開發／測試） |
+|---|---|---|
+| OS | Windows 10 / 11（64-bit） | Windows 11 26H2 |
+| CPU | 雙核心即可 | i9-13900K（24C/32T） |
+| RAM | 4 GB（speakdrill 本體 < 50 MB；MyET 多程序合計約 0.7 GB） | 32 GB |
+| GPU | 不需要（Piper TTS 與音訊全走 CPU） | — |
+| 磁碟 | 約 100 MB（程式 + Piper 聲音檔 ~82 MB）＋ 少量 TTS 快取 | — |
+
+重點：
+
+- speakdrill 本體記憶體用量在 **20 MB 級**（TUI 實測約 21 MB），幾乎可以忽略
+- MyET10（CEF）實測 7 個程序合計約 **720 MB**——能順跑 MyET，就能順跑 speakdrill
+- 本機 Piper TTS 用 CPU 合成，**不需要 GPU、不需要 Python**
+- 需要一個虛擬音效驅動：VB-CABLE（1.3 MB，零設定）或 VoiceMeeter（~30 MB）；安裝後**必須重開機**
+- 安裝驅動與 per-app 麥克風綁定需要管理員權限（會跳 UAC）
+- 需要 MyET10 已安裝（預設 `C:\Program Files (x86)\LLabs\MyET10\MyET10.exe`），並以 `--remote-debugging-port=9222 --remote-allow-origins=*` 啟動（TUI 會自動處理）
+
+---
+
 ## 安裝
 
 ### npm
