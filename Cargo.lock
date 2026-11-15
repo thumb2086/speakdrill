@@ -2616,6 +2616,7 @@ dependencies = [
  "serde_json",
  "speakdrill-core",
  "tokio",
+ "unicode-width",
 ]
 
 [[package]]

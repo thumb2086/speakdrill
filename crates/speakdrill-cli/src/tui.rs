@@ -19,7 +19,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line as TLine, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Terminal,
 };
 
@@ -58,6 +58,65 @@ impl Progress for ChannelProgress {
     }
 }
 
+/// 把一行文字依 unicode 顯示寬度 pre-wrap 成多列（CJK 每字 2 欄）
+fn wrap_text(s: &str, width: usize, out: &mut Vec<String>) {
+    use unicode_width::UnicodeWidthChar;
+    if width == 0 {
+        out.push(s.to_string());
+        return;
+    }
+    if s.is_empty() {
+        out.push(String::new());
+        return;
+    }
+    let mut cur = String::new();
+    let mut cur_w = 0usize;
+    for ch in s.chars() {
+        let w = ch.width().unwrap_or(0);
+        if cur_w + w > width && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+            cur_w = 0;
+        }
+        cur.push(ch);
+        cur_w += w;
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrap_text;
+
+    fn wrap(s: &str, w: usize) -> Vec<String> {
+        let mut out = Vec::new();
+        wrap_text(s, w, &mut out);
+        out
+    }
+
+    #[test]
+    fn ascii_wraps_by_columns() {
+        assert_eq!(wrap("hello world foo", 5), vec!["hello", " worl", "d foo"]);
+    }
+
+    #[test]
+    fn cjk_counts_double_width() {
+        // 每個 CJK 字 2 欄，寬度 6 → 每列 3 個字
+        assert_eq!(wrap("一二三四五六", 6), vec!["一二三", "四五六"]);
+    }
+
+    #[test]
+    fn empty_line_is_preserved() {
+        assert_eq!(wrap("", 10), vec![""]);
+    }
+
+    #[test]
+    fn short_line_not_split() {
+        assert_eq!(wrap("短句", 20), vec!["短句"]);
+    }
+}
+
 /// 產生正常模式下的 status 字串
 fn build_status(app: &App) -> String {
     let queued = app.queue.len();
@@ -65,7 +124,7 @@ fn build_status(app: &App) -> String {
         "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into()
     } else {
         format!(
-            "{} 本課本（{}）  ↑/↓ 移動 · Space 選取 · Enter 執行（{}）· a 全選 · x 清空 · b 全部 · c 切換課本 · q 離開",
+            "{} 本課本（{}）  ↑/↓ 移動 · Space 選取 · Enter 執行（{}）· a 全選 · x 清空 · b 全部 · PgUp/PgDn 捲動紀錄 · End 回最新 · c 切換課本 · q 離開",
             app.coursebooks.len(),
             if queued > 0 { format!("已勾 {queued} 本") } else { "Enter 跑單一課本".to_string() },
             if queued > 0 { "佇列" } else { "選取" },
@@ -99,6 +158,10 @@ struct App {
     code_select_selected: HashSet<usize>,
     /// 儲存開啟 CodeName 選單前的 status，關閉時恢復
     prev_status: String,
+    /// 紀錄面板：從最新往回捲的行數（0 = 跟隨最新輸出）
+    log_scroll: usize,
+    /// 紀錄面板可見行數（draw 時更新，供 PgUp/PgDn 翻頁用）
+    log_page: usize,
 }
 
 /// 常見 CodeName 清單（可依需求增減）
@@ -149,6 +212,8 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         code_select_idx: 0,
         code_select_selected: HashSet::new(),
         prev_status: String::new(),
+        log_scroll: 0,
+        log_page: 10,
     };
 
     // 背景載入目錄（延後到 MyET 連線後由 auto-start task 呼叫）
@@ -313,6 +378,19 @@ fn event_loop(
                         }
                         KeyCode::Up | KeyCode::Char('k') => {
                             app.sel = app.sel.saturating_sub(1);
+                        }
+                        // 紀錄面板捲動（PgUp/PgDn 翻頁、Home 到最早、End 回最新）
+                        KeyCode::PageUp => {
+                            app.log_scroll = app.log_scroll.saturating_add(app.log_page.max(1));
+                        }
+                        KeyCode::PageDown => {
+                            app.log_scroll = app.log_scroll.saturating_sub(app.log_page.max(1));
+                        }
+                        KeyCode::Home => {
+                            app.log_scroll = usize::MAX; // draw 時會夾到最上緣
+                        }
+                        KeyCode::End => {
+                            app.log_scroll = 0;
                         }
                         KeyCode::Char(' ') if !app.coursebooks.is_empty() => {
                             // Space：切換課本選取
@@ -631,7 +709,7 @@ fn spawn_catalog(tx: UnboundedSender<Ev>, refresh: bool) {
         }
     });
 }
-fn draw(f: &mut ratatui::Frame, app: &App) {
+fn draw(f: &mut ratatui::Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(6), Constraint::Length(3)])
@@ -681,19 +759,31 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
     st.select(Some(app.sel));
     f.render_stateful_widget(list, body[0], &mut st);
 
-    let lines: Vec<TLine> = app
-        .logs
-        .iter()
-        .rev()
-        .take(200)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .map(|s| TLine::from(s.clone()))
-        .collect();
-    let log = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title("紀錄"))
-        .wrap(Wrap { trim: true });
+    // 紀錄面板：自己把每行依面板寬度 pre-wrap（CJK 以 unicode 寬度計），
+    // 每列剛好對應一個畫面行 → 捲動行數可以完全確定，新行永遠釘在底部
+    let inner_width = body[1].width.saturating_sub(2).max(1) as usize;
+    let visible = body[1].height.saturating_sub(2) as usize;
+    app.log_page = visible.max(1);
+    let mut rows: Vec<String> = Vec::new();
+    for s in app.logs.iter() {
+        wrap_text(s, inner_width, &mut rows);
+    }
+    let total = rows.len();
+    let max_scroll = total.saturating_sub(visible);
+    app.log_scroll = app.log_scroll.min(max_scroll);
+    let start = if app.log_scroll == 0 {
+        max_scroll
+    } else {
+        max_scroll.saturating_sub(app.log_scroll)
+    };
+    let end = (start + visible).min(total);
+    let lines: Vec<TLine> = rows[start..end].iter().map(|s| TLine::from(s.clone())).collect();
+    let log_title = if app.log_scroll == 0 {
+        "紀錄（PgUp/PgDn 捲動 · End 回最新）".to_string()
+    } else {
+        format!("紀錄 ▲ 已回捲 {} 行（PgUp/PgDn · End 回最新）", app.log_scroll)
+    };
+    let log = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(log_title));
     f.render_widget(log, body[1]);
 
     let footer_text = if app.code_select_mode {
