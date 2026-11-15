@@ -1,0 +1,11 @@
+fix: RENEW 正則修正符合 MyET10 實際輸出格式；對話框支援多候選按鈕；加 SPEAKDRILL_DEBUG 除錯 log
+
+- RENEW regex 改成 Action="RENEW"\s+SentenceIdxArray="([0-9]+)"
+  MyET10 實際輸出：CallApp:<FlashGame Action="RENEW" SentenceIdxArray="0" />
+  先前的 RENEW\s+SentenceIdxArray= 永遠不匹配 → cur_idx 一直 None → TTS 永不播放
+  → 每句 0~7 分、全部 ✗ 重試到 max_retry 放棄
+- handle_dialog 對話框匹配改成寬鬆的「未完成」+ 多候選按鈕文字（否/不要/從頭開始/重新開始/重來）
+- SPEAKDRILL_DEBUG=1 時輸出 [cd] console event 原文
+
+實測：BKM-GAR-2A001 9/9 完成平均 91.2；BKM-GAR-2A002 13/13 完成平均 89.6
+版本 0.2.24

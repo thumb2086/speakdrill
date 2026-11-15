@@ -254,8 +254,8 @@ pub fn run_setup(opts: &SetupOptions, log: &mut dyn FnMut(String)) -> Result<()>
                         return g.eq_ignore_ascii_case(exp);
                     }
                 }
-                // 如果 001_001 不存在，fallback 到 any_matches
-                b.any_matches(exp)
+                // 如果 001_001 不存在或 GUID 不匹配，不 fallback（避免誤判）
+                false
             }
             _ => false,
         }

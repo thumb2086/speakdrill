@@ -38,7 +38,7 @@ fn friendly_name(dev: &IMMDevice) -> Option<String> {
     }
 }
 
-fn enumerate(flow_capture: bool) -> Result<Vec<(IMMDevice, String)>> {
+pub fn enumerate(flow_capture: bool) -> Result<Vec<(IMMDevice, String)>> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let enumerator: IMMDeviceEnumerator =

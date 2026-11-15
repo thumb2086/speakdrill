@@ -126,9 +126,14 @@ async fn handle_dialog(cdp: &Cdp, resume: bool, allow_retry: bool) -> Option<Str
         r#"(() => {{
             const byText = (t) => Array.from(document.querySelectorAll('a,button')).find(e => (e.innerText||'').trim() === t);
             const body = document.body ? document.body.innerText : '';
-            if (body.includes('繼續進行未完成的句子')) {{
-                const b = byText({resume});
-                if (b) {{ b.click(); return 'start'; }}
+            if (body.includes('未完成')) {{
+                console.log('RESUME_DIALOG|' + body.slice(0,300));
+                const cand = {resume} === '是' ? ['是','繼續','繼續練習'] : ['否','不要','從頭開始','重新開始','重來'];
+                for (const t of cand) {{
+                    const b = byText(t);
+                    if (b) {{ b.click(); return t; }}
+                }}
+                return 'unmatched';
             }}
             if ({allow_retry}) {{
                 const r = byText('再試一次');
@@ -229,8 +234,11 @@ pub async fn run_lesson(
             let Some(e) = ev else { break };
             let t = &e.text;
             last_event = Instant::now();
+            if std::env::var_os("SPEAKDRILL_DEBUG").is_some() {
+                p.log(&format!("[cd] {:.180}", t));
+            }
 
-            if let Some(cap) = regex::Regex::new(r#"RENEW\s+SentenceIdxArray="(\d+)""#)
+            if let Some(cap) = regex::Regex::new(r#"Action="RENEW"\s+SentenceIdxArray="(\d+)""#)
                 .unwrap()
                 .captures(t)
             {
