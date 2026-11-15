@@ -135,7 +135,7 @@ fn build_status(app: &App) -> String {
         "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into()
     } else {
         format!(
-            "{} 本課本（{}）  ↑/↓ 移動 · Space 選取 · Enter 執行（{}）· a 全選 · x 清空 · b 全部 · PgUp/PgDn 捲動紀錄 · End 回最新 · q 離開",
+            "{} 本課本（{}）  ↑/↓ 移動 · Space 選取 · Enter 執行（{}）· a 全選 · x 清空 · b 全部 · r 重載 · m 啟動 MyET · s 停止 · PgUp/PgDn 捲動 · End 回最新 · q 離開",
             app.coursebooks.len(),
             if queued > 0 { format!("已勾 {queued} 本") } else { "Enter 跑單一課本".to_string() },
             if queued > 0 { "佇列" } else { "選取" },

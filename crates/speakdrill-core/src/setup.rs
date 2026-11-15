@@ -234,15 +234,6 @@ pub fn run_setup(opts: &SetupOptions, log: &mut dyn FnMut(String)) -> Result<()>
     }
 
     let pids = process_pids(&cfg.app_exe);
-    if pids.is_empty() {
-        log(format!("⚠ 找不到 {} 的執行程序", cfg.app_exe));
-        log("  要讓程式自動設定，MyET 至少要啟動一次並用過麥克風（Windows 才會列在 mixer 裡）".to_string());
-        log("  已開啟 ms-settings:apps-volume，啟動 MyET 後再跑一次 setup".to_string());
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "ms-settings:apps-volume"])
-            .status();
-        return Ok(());
-    }
 
     let expected_mic = crate::winvol::find_endpoint_id(&route.mic_device, true);
     let mic_ok = || -> bool {
@@ -260,10 +251,20 @@ pub fn run_setup(opts: &SetupOptions, log: &mut dyn FnMut(String)) -> Result<()>
             _ => false,
         }
     };
-    // registry 已綁定且沒有強制/輸出/dry-run 需求時直接結束
+    // registry 已綁定且沒有強制/輸出/dry-run 需求時直接結束（不需要 MyET 正在執行）
     if !opts.force && !opts.dry_run && opts.set_output.is_none() && mic_ok() {
         log(format!("✓ {} 已綁定 {}", cfg.app_exe, route.mic_device));
         log("（要強制重設請加 --force；要設定輸出裝置請加 --set-output）".to_string());
+        return Ok(());
+    }
+
+    if pids.is_empty() {
+        log(format!("⚠ 找不到 {} 的執行程序", cfg.app_exe));
+        log("  要讓程式自動設定，MyET 至少要啟動一次並用過麥克風（Windows 才會列在 mixer 裡）".to_string());
+        log("  已開啟 ms-settings:apps-volume，啟動 MyET 後再跑一次 setup".to_string());
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "ms-settings:apps-volume"])
+            .status();
         return Ok(());
     }
 

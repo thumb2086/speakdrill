@@ -143,7 +143,7 @@ async fn cmd_init(
     if let Some(s) = server { cfg.server = s; }
     if let Some(c) = code { cfg.code = c; }
 
-    println!("\n[1/5] 輸出裝置");
+    println!("\n[1/6] 輸出裝置");
     let outs = list_outputs();
     for o in &outs {
         let mark = if o.to_lowercase().contains(&cfg.play_device.to_lowercase()) { " <== 選用" } else { "" };
@@ -153,7 +153,7 @@ async fn cmd_init(
         println!("  ⚠ 找不到「{}」，請用 --device 指定", cfg.play_device);
     }
 
-    println!("\n[2/5] TTS 引擎");
+    println!("\n[2/6] TTS 引擎");
     match speakdrill_core::piper::ensure_piper(&mut |m| println!("  {m}")) {
         Ok(p) => {
             cfg.tts.engine = speakdrill_core::TtsEngine::Piper {
@@ -173,7 +173,7 @@ async fn cmd_init(
         }
     }
 
-    println!("\n[3/5] 虛擬音效迴路");
+    println!("\n[3/6] 虛擬音效迴路");
     let mut chosen: Option<speakdrill_core::devices::VirtualRoute> = None;
     for r in speakdrill_core::devices::routes() {
         match AudioPlayer::new(&r.play_device) {
@@ -233,7 +233,7 @@ async fn cmd_init(
         }
     }
 
-    println!("\n[4/5] Windows 裝置音量");
+    println!("\n[4/6] Windows 裝置音量");
     #[cfg(windows)]
     {
         // 只在 VoiceMeeter 路線時設定 B1 音量
@@ -252,15 +252,29 @@ async fn cmd_init(
     println!("  非 Windows，略過");
 
     cfg.save()?;
-    println!("\n[5/5] 設定已寫入 {}", config_path().display());
+    println!("\n[5/6] 設定已寫入 {}", config_path().display());
 
-    println!("\n{}", "─".repeat(64));
-    println!("還剩一步（Windows 只允許用介面設定）：");
-    println!("  1. Win+R → ms-settings:apps-volume");
-    println!("  2. 找到「English-Chinese-Japanese」（就是 MyET）並展開");
-    println!("  3. 輸入裝置 → 選「{}」", mic_device_hint);
-    println!("  （輸出裝置可留原值；全域預設麥克風不用改）");
-    println!("{}", "─".repeat(64));
+    println!("\n[6/6] 自動設定 per-app 麥克風（registry → COM → UIA）");
+    #[cfg(windows)]
+    {
+        match speakdrill_core::setup::run_setup(
+            &speakdrill_core::setup::SetupOptions::default(),
+            &mut |s| println!("  {s}"),
+        ) {
+            Ok(()) => println!("  （如上方顯示「已綁定」即完成；否則請先開過 MyET 再跑 `speakdrill setup`）"),
+            Err(e) => {
+                println!("  ⚠ 自動設定失敗：{e}");
+                println!("{}", "─".repeat(64));
+                println!("手動步驟（或先開過一次 MyET 再跑 `speakdrill setup`）：");
+                println!("  1. Win+R → ms-settings:apps-volume");
+                println!("  2. 找到「English-Chinese-Japanese」（就是 MyET）並展開");
+                println!("  3. 輸入裝置 → 選「{}」", mic_device_hint);
+                println!("{}", "─".repeat(64));
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    println!("  非 Windows，略過");
     Ok(())
 }
 

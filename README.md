@@ -93,8 +93,8 @@ cargo build --release
 ## 設定
 
 ```bash
-speakdrill init                  # 偵測裝置 + 寫設定 + 設 VoiceMeeter 路由 + 拉音量
-speakdrill doctor                # 檢查 port / 登入 / 裝置 / VoiceMeeter / TTS
+speakdrill init                  # 偵測裝置 + 寫設定 + 設 VoiceMeeter 路由 + 拉音量 + 自動綁 per-app 麥克風
+speakdrill doctor                # 檢查 port / 登入 / 裝置 / VoiceMeeter / TTS / 麥克風綁定
 speakdrill init --device "Voicemeeter Input" --server https://140.125.168.213 --code BKM_1A
 ```
 
@@ -106,6 +106,7 @@ speakdrill init --device "Voicemeeter Input" --server https://140.125.168.213 --
 | **B1 裝置音量** | 預設竟然是 **24.3%**，會讓評分引擎判「太小聲」。自動拉到 100% |
 | 播放裝置音量 | 同樣拉到 100% |
 | TTS 引擎 | 自動下載 Piper（單一 exe，不需要 Python） |
+| **per-app 麥克風綁定** | 自動跑 `speakdrill setup`（registry → COM → UIA），無需手動；失敗時才印手動步驟 |
 
 ### 虛擬音效迴路
 
@@ -138,7 +139,8 @@ speakdrill init --install-driver     # 沒偵測到裝置時，自動下載並�
 ### 自動設定 per-app 麥克風（setup）
 
 Windows 不讓 App 用介面改自己的裝置（登錄值裡有一組 Windows 產生的綁定 GUID，自己手寫無效），
-而且只有 App 有 audio session 時 mixer 才會列出它。`speakdrill setup` 用三層策略解決：
+而且只有 App 有 audio session 時 mixer 才會列出它。`speakdrill setup` 用三層策略解決
+（**`speakdrill init` 已經會自動呼叫**，通常不需要手動跑）：
 
 1. **讀 registry** 確認 App 的 per-app 麥克風已綁定 → 已綁定就直接結束（什麼都不動）。
 2. **COM API** `SetPersistedDefaultAudioEndpoint` 直接寫入 → 成功就 registry 驗證並結束。

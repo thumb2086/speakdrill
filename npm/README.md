@@ -40,8 +40,8 @@ speakdrill doctor
 ## 快速開始
 
 ```bash
-speakdrill init                  # 偵測裝置、寫設定、自動安裝 VB-CABLE 或設 VoiceMeeter 路由、拉音量
-speakdrill setup                 # 自動完成 per-app 麥克風綁定（原本需手動在 ms-settings:apps-volume 設定）
+speakdrill init                  # 偵測裝置、寫設定、自動安裝 VB-CABLE 或設 VoiceMeeter 路由、拉音量、自動綁 per-app 麥克風（registry → COM → UIA）
+speakdrill setup                 # 手動重跑/修復 per-app 麥克風綁定（init 已自動呼叫過；失敗時才需手動）
 speakdrill doctor                # 檢查環境
 speakdrill                       # 終端機介面（預設）
 speakdrill list                  # 列出課程
@@ -58,7 +58,7 @@ speakdrill reset                 # 還原音訊路由
    - 已安裝 VoiceMeeter 者可直接使用，`init` 會偵測並設定路由
 2. **不需要額外裝 TTS**：`speakdrill init` 自動下載 Piper
 3. **MyET 的 debug port**：TUI 啟動時會自動檢查 port 9222，沒連上就自動啟動 MyET（帶 `--remote-debugging-port=9222 --remote-allow-origins=*`）；也可以在 TUI 裡按 `m` 手動啟動
-4. **per-app 麥克風綁定**：`speakdrill setup` 會自動完成（原本需手動在 `ms-settings:apps-volume` 設定），VB-CABLE 時會綁定 `CABLE Output (VB-Audio Virtual Cable)`，VoiceMeeter 時綁定 `Voicemeeter Out B1`
+4. **per-app 麥克風綁定**：`speakdrill init` 會自動完成（registry → COM → UIA；原本需手動在 `ms-settings:apps-volume` 設定）。自動失敗時可跑 `speakdrill setup` 重試；VB-CABLE 綁定 `CABLE Output (VB-Audio Virtual Cable)`，VoiceMeeter 綁定 `Voicemeeter Out B1`
 
 ## 文件
 
