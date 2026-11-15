@@ -34,6 +34,8 @@ pub enum Ev {
     Catalog(Vec<LessonRef>),
     CatalogAppend(Vec<LessonRef>),
     MyetStats(speakdrill_core::MyetStats),
+    /// MyET 官方累計時數讀取失敗（才退回顯示本機值）
+    MyetStatsFailed,
     Log(String),
     Score(LineScore),
     LessonStart(String),
@@ -163,6 +165,8 @@ struct App {
     myet_hours: Option<f64>,
     myet_level: Option<String>,
     myet_certs: Option<u64>,
+    /// MyET 官方時數讀取失敗（顯示本機值）
+    myet_stats_failed: bool,
     status: String,
     /// 紀錄面板：從最新往回捲的行數（0 = 跟隨最新輸出）
     log_scroll: usize,
@@ -189,6 +193,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         myet_hours: None,
         myet_level: None,
         myet_certs: None,
+        myet_stats_failed: false,
         status: "載入目錄中…".into(),
         log_scroll: 0,
         log_page: 10,
@@ -249,6 +254,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
             }
             Err(e) => {
                 let _ = tx_stats.send(Ev::Log(format!("MyET 累計時數讀取失敗（改用本機累計）：{e}")));
+                let _ = tx_stats.send(Ev::MyetStatsFailed);
             }
         }
     });
@@ -519,6 +525,9 @@ fn apply(app: &mut App, ev: Ev) {
             app.myet_level = s.level;
             app.myet_certs = s.certs;
         }
+        Ev::MyetStatsFailed => {
+            app.myet_stats_failed = true;
+        }
         Ev::Log(s) => push_log(app, s),
         Ev::Score(s) => {
             push_log(app, format!(
@@ -625,7 +634,10 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
         Span::raw(format!("   完成 {} 句  平均 {:.1}", app.total_done, avg)),
         Span::raw(match &app.myet_hours {
             Some(h) => format!("   MyET 累計 {:.1} 小時", h),
-            None => format!("   累計 {:.1} 小時（本機）", app.total_secs as f64 / 3600.0),
+            None if app.myet_stats_failed => {
+                format!("   累計 {:.1} 小時（本機）", app.total_secs as f64 / 3600.0)
+            }
+            None => "   累計 …".to_string(),
         }),
     ]))
     .block(Block::default().borders(Borders::ALL).title("speakdrill 口說自動練習"));

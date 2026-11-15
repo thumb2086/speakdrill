@@ -15,6 +15,8 @@ enum Ev {
     Catalog(Vec<LessonRef>),
     CatalogAppend(Vec<LessonRef>),
     MyetStats(speakdrill_core::MyetStats),
+    /// MyET 官方累計時數讀取失敗（才退回顯示本機值）
+    MyetStatsFailed,
     Log(String),
     Line(speakdrill_core::LineScore),
     LessonDone(LessonReport),
@@ -69,6 +71,8 @@ struct App {
     myet_hours: Option<f64>,
     myet_level: Option<String>,
     myet_certs: Option<u64>,
+    /// MyET 官方時數讀取失敗（顯示本機值）
+    myet_stats_failed: bool,
     pass: u32,
     setup_busy: bool,
 }
@@ -104,6 +108,7 @@ impl App {
             myet_hours: None,
             myet_level: None,
             myet_certs: None,
+            myet_stats_failed: false,
             pass: 80,
             setup_busy: false,
         };
@@ -135,6 +140,7 @@ fn load_myet_stats(tx: Sender<Ev>) {
                 }
                 Err(e) => {
                     let _ = tx.send(Ev::Log(format!("MyET 累計時數讀取失敗（用本機累計）：{e}")));
+                    let _ = tx.send(Ev::MyetStatsFailed);
                 }
             }
         });
@@ -213,6 +219,45 @@ fn load_catalog(tx: Sender<Ev>, refresh: bool) {
                 }
             }
             let _ = tx.send(Ev::Log("目錄載入完成".into()));
+        });
+    });
+}
+
+/// 手動啟動 MyET（帶 CDP debug port）；已在執行就不重搶，啟動後自動重載目錄
+fn start_myet(tx: Sender<Ev>) {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            use tokio::time::Duration as TokioDuration;
+
+            let cfg = speakdrill_core::Config::load_or_default();
+            if Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
+                let _ = tx.send(Ev::Log(format!("MyET 已在執行（CDP {} OK）", cfg.cdp_port)));
+                return;
+            }
+            let myet_path = std::env::var("SPEAKDRILL_MYET_PATH")
+                .unwrap_or_else(|_| r"C:\Program Files (x86)\LLabs\MyET10\MyET10.exe".to_string());
+            if !std::path::Path::new(&myet_path).exists() {
+                let _ = tx.send(Ev::Log("找不到 MyET 執行檔".into()));
+                return;
+            }
+            let port_str = cfg.cdp_port.to_string();
+            let _ = std::process::Command::new(&myet_path)
+                .args([
+                    format!("--remote-debugging-port={}", port_str),
+                    "--remote-allow-origins=*".to_string(),
+                ])
+                .spawn();
+            let _ = tx.send(Ev::Log(format!("正在啟動 MyET（debug port {}）…", port_str)));
+            for _ in 0..20 {
+                tokio::time::sleep(TokioDuration::from_secs(1)).await;
+                if Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
+                    let _ = tx.send(Ev::Log("MyET 已連線，重新載入目錄…".into()));
+                    load_catalog(tx.clone(), false);
+                    return;
+                }
+            }
+            let _ = tx.send(Ev::Log("MyET 已啟動，但 CDP 未連上".into()));
         });
     });
 }
@@ -357,6 +402,9 @@ impl eframe::App for App {
                     self.myet_level = s.level;
                     self.myet_certs = s.certs;
                 }
+                Ev::MyetStatsFailed => {
+                    self.myet_stats_failed = true;
+                }
                 Ev::Log(s) => push_log(self, s),
                 Ev::Line(s) => {
                     push_log(
@@ -483,6 +531,10 @@ impl eframe::App for App {
                     push_log(self, "... 重新載入目錄".into());
                     load_catalog(self.tx.clone(), true);
                 }
+                if ui.add_enabled(!self.running, egui::Button::new("🚀 啟動 MyET")).clicked() {
+                    push_log(self, "... 啟動 MyET（debug port 9222）".into());
+                    start_myet(self.tx.clone());
+                }
                 ui.separator();
                 if ui.add_enabled(!self.setup_busy, egui::Button::new("🔧 自動設定音訊")).clicked() {
                     self.setup_busy = true;
@@ -542,7 +594,10 @@ impl eframe::App for App {
                 ui.separator();
                 let acc = match &self.myet_hours {
                     Some(h) => format!("MyET 累計 {:.1} 小時", h),
-                    None => format!("累計 {:.1} 小時（本機）", self.total_secs as f64 / 3600.0),
+                    None if self.myet_stats_failed => {
+                        format!("累計 {:.1} 小時（本機）", self.total_secs as f64 / 3600.0)
+                    }
+                    None => "累計 …".to_string(),
                 };
                 if self.avg_n > 0 {
                     ui.label(format!(

@@ -156,7 +156,7 @@ speakdrill setup --force             # 即使已綁定也重設
 speakdrill setup --restart-settings  # 「設定」視窗卡死時，先關閉再重開並自動設定
 ```
 
-GUI 的頂端也有「🔧 自動設定音訊」按鈕與「▶ 跑佇列（N）」按鈕，呼叫同一段程式；左側課程清單有核取方塊可勾選加入佇列。
+GUI 的頂端也有「🔧 自動設定音訊」按鈕與「▶ 跑佇列（N）」按鈕，呼叫同一段程式；「🚀 啟動 MyET」按鈕則以 `--remote-debugging-port=9222 --remote-allow-origins=*` 啟動 MyET10（已在執行就不重搶）；左側課程清單有核取方塊可勾選加入佇列。
 終端機介面（TUI）：`Space` 勾/取消課本（黃色 ●）、`Shift+Space` 把同 course_id 的整課程加入佇列、`Enter` 執行（有佇列跑佇列，沒有就跑選取）、`a` 全選/取消、`x` 清空佇列、`b` 或 `B` 跑全部、`r` 重新載入目錄、`m` 自動啟動 MyET、`s` 請求中止、`PgUp`/`PgDn` 捲動紀錄、`Home` 跳到最早、`End` 回到最新、`Ctrl+C`/`q`/`Esc` 離開。
 注意：**目標 App 必須啟動過且用過麥克風**（Windows mixer 只列有 audio session 的 App）。
 手動 fallback：`ms-settings:apps-volume` → 找到目標 App（MyET 會顯示為 **English-Chinese-Japanese**）→ 展開 → 輸入裝置 → `CABLE Output (VB-Audio Virtual Cable)`。
