@@ -54,6 +54,7 @@
   - config.rs：預設 TTS 模板改為說明由 init 自動設定 Piper
   - 移除 npm/bin/binaries/ 陳舊 exe、npm/speakdrill-0.1.2.tgz、根目錄一次性腳本（bump_version.py 等）
   準備 bump 版本 → tag → 推送 → CI 驗收。
+
 - [2026-11-14] checkpoint7：發布完成 ✅
   - v0.2.14 已推送 tag，CI release workflow 全部通過（verify、build、npm）
   - npm package 0.2.14 已發布至 registry，`latest` 標籤指向 0.2.14
@@ -62,5 +63,11 @@
   - install.js 修復：改用 .NET ZipFile::ExtractToDirectory 直接解壓，解決 PowerShell 7 模組衝突導致的解壓失敗
   - GitHub Release v0.2.14 已建立，含 speakdrill.exe、speakdrill-gui.exe
   - 所有停止條件已滿足，目標達成
+- [2026-11-15] checkpoint8：v0.2.24 發布並實測通過 ✅
+  - 根因：我 checkpoint5 把 RENEW 正則「修」成 `RENEW\s+SentenceIdxArray=`，但 MyET10 實際 console 是 `CallApp:<FlashGame Action="RENEW" SentenceIdxArray="0" ...>`，正則永遠不匹配 → cur_idx 恆 None → TTS 不播 → 每句 0~7 分 → 卡死在重試
+  - 修正：`Action="RENEW"\s+SentenceIdxArray="([0-9]+)"`；對話框改寬鬆 `未完成` 匹配 + 多候選按鈕；新增 `SPEAKDRILL_DEBUG=1` 輸出 `[cd]` console event
+  - v0.2.24 CI (run 43713130408)：verify/build/npm 全部通過；`npm i -g speakdrill@latest` → v0.2.24；`speakdrill doctor` 全部正常
+  - 實測 BKM-GAR-2A001 9/9 平均 91.2；TUI 實測 21 句平均 90.0
+  - 使用者確認：「確定對了，沒錯了」
 - Status: completed
-- Updated: 2026-11-14T18:45:00+08:00
+- Updated: 2026-11-15T12:30:00+08:00
