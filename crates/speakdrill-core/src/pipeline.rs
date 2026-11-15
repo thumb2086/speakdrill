@@ -403,7 +403,43 @@ pub fn save_report(r: &LessonReport) -> Result<PathBuf> {
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{}.json", r.lesson_id));
     std::fs::write(&path, serde_json::to_string_pretty(r)?)?;
+    // 累計練習時數：每份報告寫入時把 elapsed_secs 加到總帳
+    let _ = totals_add(r.elapsed_secs);
     Ok(path)
+}
+
+const TOTALS_FILE: &str = "totals.json";
+
+fn totals_path() -> PathBuf {
+    crate::config::reports_dir().join(TOTALS_FILE)
+}
+
+/// 讀取累計練習秒數（檔案不存在或損毀時回傳 0）
+pub fn totals_get() -> u64 {
+    let p = totals_path();
+    match std::fs::read_to_string(&p) {
+        Ok(s) => serde_json::from_str::<serde_json::Value>(&s)
+            .ok()
+            .and_then(|v| v.get("total_secs").and_then(|x| x.as_u64()))
+            .unwrap_or(0),
+        Err(_) => 0,
+    }
+}
+
+/// 累計 n 秒並回傳新總數（tmp + rename 原子寫入）
+pub fn totals_add(n: u64) -> u64 {
+    let total = totals_get().saturating_add(n);
+    let p = totals_path();
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let tmp = p.with_extension("json.tmp");
+    let body = serde_json::json!({ "total_secs": total });
+    if std::fs::write(&tmp, body.to_string()).is_ok() {
+        // 覆寫：直接 rename 掉（Windows 下會取代現有檔案）
+        let _ = std::fs::rename(&tmp, &p);
+    }
+    total
 }
 
 /// 檢查「App 的 per-app 麥克風」是否就是我們送聲音的那個裝置。

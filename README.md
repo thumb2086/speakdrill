@@ -194,6 +194,7 @@ speakdrill reset --yes            # 連設定檔一起刪
 
 - 報告：`%APPDATA%\speakdrill\reports\<LessonID>.json`
 - TTS 快取：`%LOCALAPPDATA%\speakdrill\audio\<LessonID>\`
+- 累計練習時數（MyET 官方 Dashboard 的「學習時間」，啟動時由 TUI／GUI 讀取並顯示）
 
 ---
 

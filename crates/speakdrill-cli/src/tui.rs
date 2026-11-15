@@ -33,6 +33,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 pub enum Ev {
     Catalog(Vec<LessonRef>),
     CatalogAppend(Vec<LessonRef>),
+    MyetStats(speakdrill_core::MyetStats),
     Log(String),
     Score(LineScore),
     LessonStart(String),
@@ -146,8 +147,8 @@ struct App {
     lessons: Vec<(String, String)>,
     /// 課本清單：(CodeName, 顯示名稱, [lesson_id, course_id])
     coursebooks: Vec<(String, String, Vec<(String, String)>)>,
-    /// 佇列：課本索引
-    queue: HashSet<usize>,
+    /// 佇列：課本索引（Vec 保留勾選順序）
+    queue: Vec<usize>,
     /// 已完成的課程 ID
     completed: HashSet<String>,
     sel: usize,
@@ -156,6 +157,12 @@ struct App {
     total_done: usize,
     avg_sum: f64,
     avg_n: usize,
+    /// 累計練習時數（秒，本機累計；MyET 官方時數在 myet_hours）
+    total_secs: u64,
+    /// MyET 官方累計學習時數（小時）
+    myet_hours: Option<f64>,
+    myet_level: Option<String>,
+    myet_certs: Option<u64>,
     status: String,
     /// 紀錄面板：從最新往回捲的行數（0 = 跟隨最新輸出）
     log_scroll: usize,
@@ -170,7 +177,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
     let mut app = App {
         lessons: Vec::new(),
         coursebooks: Vec::new(),
-        queue: HashSet::new(),
+        queue: Vec::new(),
         completed: HashSet::new(),
         sel: 0,
         logs: Vec::new(),
@@ -178,6 +185,10 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         total_done: 0,
         avg_sum: 0.0,
         avg_n: 0,
+        total_secs: speakdrill_core::totals_get(),
+        myet_hours: None,
+        myet_level: None,
+        myet_certs: None,
         status: "載入目錄中…".into(),
         log_scroll: 0,
         log_page: 10,
@@ -218,6 +229,28 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
             }
         }
         let _ = tx_clone.send(Ev::Log("MyET 已啟動，但 CDP 未連上".into()));
+    });
+
+    // 背景讀 MyET 官方累計學習時數（學習顧問室 Dashboard.aspx）；
+    // 等到 MyET 有 page target 後讀背景分頁、讀完即關，不影響課堂分頁
+    let tx_stats = tx.clone();
+    rt.spawn(async move {
+        let cfg = speakdrill_core::Config::load_or_default();
+        for _ in 0..40 {
+            tokio::time::sleep(TokioDuration::from_millis(500)).await;
+            if speakdrill_core::Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
+                break;
+            }
+        }
+        match speakdrill_core::fetch_myet_stats(&cfg.server, cfg.cdp_port).await {
+            Ok(s) => {
+                let _ = tx_stats.send(Ev::Log(format!("MyET 官方累計學習時間：{:.1} 小時", s.hours)));
+                let _ = tx_stats.send(Ev::MyetStats(s));
+            }
+            Err(e) => {
+                let _ = tx_stats.send(Ev::Log(format!("MyET 累計時數讀取失敗（改用本機累計）：{e}")));
+            }
+        }
     });
 
     enable_raw_mode()?;
@@ -283,11 +316,11 @@ fn event_loop(
                             app.log_scroll = 0;
                         }
                         KeyCode::Char(' ') if !app.coursebooks.is_empty() => {
-                            // Space：切換課本選取
+                            // Space：切換課本選取（佇列保留勾選順序）
                             if app.queue.contains(&app.sel) {
-                                app.queue.remove(&app.sel);
+                                app.queue.retain(|&i| i != app.sel);
                             } else {
-                                app.queue.insert(app.sel);
+                                app.queue.push(app.sel);
                             }
                         }
                         KeyCode::Char('x') if !app.queue.is_empty() => {
@@ -295,7 +328,7 @@ fn event_loop(
                             push_log(app, "(已清空佇列)".into());
                         }
                         KeyCode::Char('a') if !app.coursebooks.is_empty() => {
-                            let all: HashSet<usize> = (0..app.coursebooks.len()).collect();
+                            let all: Vec<usize> = (0..app.coursebooks.len()).collect();
                             if app.queue.len() == all.len() {
                                 app.queue.clear();
                                 push_log(app, "(取消全選)".into());
@@ -328,20 +361,31 @@ fn event_loop(
                             push_log(app, "... 請求中止".into());
                         }
                         KeyCode::Enter if !app.running && !app.coursebooks.is_empty() => {
-                            // 把選中的課本展開為 lessons
-                            let mut picked = Vec::new();
+                            // 把選中的課本（或佇列中的課本，保留勾選順序）展開為 lessons；
+                            // 已完成的課自動略過
                             let selected: Vec<usize> = if app.queue.is_empty() {
                                 vec![app.sel]
                             } else {
-                                app.queue.iter().copied().collect()
+                                app.queue.clone()
                             };
+                            let mut picked = Vec::new();
+                            let mut skipped = 0usize;
                             for &idx in &selected {
                                 if let Some((_, _, lessons)) = app.coursebooks.get(idx) {
-                                    picked.extend(lessons.clone());
+                                    for (lid, cid) in lessons {
+                                        if app.completed.contains(lid) {
+                                            skipped += 1;
+                                        } else {
+                                            picked.push((lid.clone(), cid.clone()));
+                                        }
+                                    }
                                 }
                             }
+                            if skipped > 0 {
+                                push_log(app, format!("略過已完成 {} 課（佇列共 {} 課）", skipped, picked.len() + skipped));
+                            }
                             if picked.is_empty() {
-                                push_log(app, "(佇列與目錄對不上，請按 r 重新載入)".into());
+                                push_log(app, "（佇列中的課本都已完成；要全部重跑按 b）".into());
                             } else {
                                 start_batch(app, rt, tx.clone(), stop.clone(), picked);
                             }
@@ -470,6 +514,11 @@ fn apply(app: &mut App, ev: Ev) {
     match ev {
         Ev::Catalog(list) => merge_catalog(app, list, true),
         Ev::CatalogAppend(list) => merge_catalog(app, list, false),
+        Ev::MyetStats(s) => {
+            app.myet_hours = Some(s.hours);
+            app.myet_level = s.level;
+            app.myet_certs = s.certs;
+        }
         Ev::Log(s) => push_log(app, s),
         Ev::Score(s) => {
             push_log(app, format!(
@@ -483,6 +532,7 @@ fn apply(app: &mut App, ev: Ev) {
         Ev::LessonStart(l) => push_log(app, format!("=== {l} ===")),
         Ev::LessonDone(r) => {
             app.completed.insert(r.lesson_id.clone());
+            app.total_secs += r.elapsed_secs;
             push_log(app, format!(
                 "✓ {} 平均 {} （{} 句 / {} 秒）",
                 r.lesson_id, r.avg, r.lines.len(), r.elapsed_secs
@@ -573,6 +623,10 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
         Span::raw(format!("  {} 課", app.lessons.len())),
         Span::raw(if app.running { "   ● 執行中" } else { "" }),
         Span::raw(format!("   完成 {} 句  平均 {:.1}", app.total_done, avg)),
+        Span::raw(match &app.myet_hours {
+            Some(h) => format!("   MyET 累計 {:.1} 小時", h),
+            None => format!("   累計 {:.1} 小時（本機）", app.total_secs as f64 / 3600.0),
+        }),
     ]))
     .block(Block::default().borders(Borders::ALL).title("speakdrill 口說自動練習"));
     f.render_widget(header, chunks[0]);

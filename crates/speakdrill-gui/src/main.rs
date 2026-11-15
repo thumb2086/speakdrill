@@ -14,6 +14,7 @@ use std::sync::Arc;
 enum Ev {
     Catalog(Vec<LessonRef>),
     CatalogAppend(Vec<LessonRef>),
+    MyetStats(speakdrill_core::MyetStats),
     Log(String),
     Line(speakdrill_core::LineScore),
     LessonDone(LessonReport),
@@ -49,8 +50,8 @@ struct App {
     coursebooks: Vec<Coursebook>,
     /// 已完成的課程 ID（best_score 有值）
     completed: HashSet<String>,
-    /// 佇列：課本索引（與 TUI 相同語意）
-    queue: HashSet<usize>,
+    /// 佇列：課本索引（Vec 保留勾選順序，與 TUI 相同語意）
+    queue: Vec<usize>,
     /// 目前選取的課本索引
     sel: usize,
     logs: Vec<String>,
@@ -62,6 +63,12 @@ struct App {
     done: usize,
     avg_sum: f64,
     avg_n: usize,
+    /// 累計練習時數（秒，本機累計；MyET 官方時數在 myet_hours）
+    total_secs: u64,
+    /// MyET 官方累計學習時數（小時）
+    myet_hours: Option<f64>,
+    myet_level: Option<String>,
+    myet_certs: Option<u64>,
     pass: u32,
     setup_busy: bool,
 }
@@ -82,7 +89,7 @@ impl App {
             lessons: Vec::new(),
             coursebooks: Vec::new(),
             completed: HashSet::new(),
-            queue: HashSet::new(),
+            queue: Vec::new(),
             sel: 0,
             logs: vec!["載入目錄中…".into()],
             running: false,
@@ -93,12 +100,45 @@ impl App {
             done: 0,
             avg_sum: 0.0,
             avg_n: 0,
+            total_secs: speakdrill_core::totals_get(),
+            myet_hours: None,
+            myet_level: None,
+            myet_certs: None,
             pass: 80,
             setup_busy: false,
         };
         load_catalog(tx.clone(), false);
+        load_myet_stats(tx.clone());
         app
     }
+}
+
+/// 背景讀 MyET 官方累計學習時數；失敗時保留本機累計
+fn load_myet_stats(tx: Sender<Ev>) {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            use tokio::time::Duration as TokioDuration;
+
+            let cfg = speakdrill_core::Config::load_or_default();
+            // 等 MyET 有 page target（最多 20 秒）
+            for _ in 0..40 {
+                tokio::time::sleep(TokioDuration::from_millis(500)).await;
+                if Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
+                    break;
+                }
+            }
+            match speakdrill_core::fetch_myet_stats(&cfg.server, cfg.cdp_port).await {
+                Ok(s) => {
+                    let _ = tx.send(Ev::Log(format!("MyET 官方累計學習時間：{:.1} 小時", s.hours)));
+                    let _ = tx.send(Ev::MyetStats(s));
+                }
+                Err(e) => {
+                    let _ = tx.send(Ev::Log(format!("MyET 累計時數讀取失敗（用本機累計）：{e}")));
+                }
+            }
+        });
+    });
 }
 
 /// 背景載入所有課本目錄；MyET 沒連線就自動啟動並等待最多 20 秒（與 TUI 相同）
@@ -312,6 +352,11 @@ impl eframe::App for App {
                 Ev::CatalogAppend(l) => {
                     merge_catalog(self, l, false);
                 }
+                Ev::MyetStats(s) => {
+                    self.myet_hours = Some(s.hours);
+                    self.myet_level = s.level;
+                    self.myet_certs = s.certs;
+                }
                 Ev::Log(s) => push_log(self, s),
                 Ev::Line(s) => {
                     push_log(
@@ -327,6 +372,7 @@ impl eframe::App for App {
                 }
                 Ev::LessonDone(r) => {
                     self.completed.insert(r.lesson_id.clone());
+                    self.total_secs += r.elapsed_secs;
                     push_log(
                         self,
                         format!(
@@ -356,20 +402,27 @@ impl eframe::App for App {
             }
         }
 
-        // 把選中的課本（或佇列中的課本）展開成 lessons
-        let expand = |app: &App, queued: bool| -> Vec<(String, String)> {
+        // 把選中的課本（或佇列中的課本）展開成 lessons；已完成的課自動略過
+        let expand = |app: &App, queued: bool| -> (Vec<(String, String)>, usize) {
             let selected: Vec<usize> = if queued {
-                app.queue.iter().copied().collect()
+                app.queue.clone()
             } else {
                 vec![app.sel]
             };
             let mut picked = Vec::new();
+            let mut skipped = 0usize;
             for &idx in &selected {
                 if let Some((_, _, lessons)) = app.coursebooks.get(idx) {
-                    picked.extend(lessons.iter().map(|l| (l.lesson_id.clone(), l.course_id.clone())));
+                    for l in lessons {
+                        if app.completed.contains(&l.lesson_id) {
+                            skipped += 1;
+                        } else {
+                            picked.push((l.lesson_id.clone(), l.course_id.clone()));
+                        }
+                    }
                 }
             }
-            picked
+            (picked, skipped)
         };
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
@@ -378,9 +431,12 @@ impl eframe::App for App {
                 ui.separator();
 
                 if ui.add_enabled(!self.running, egui::Button::new("▶ 跑選取")).clicked() {
-                    let picked = expand(self, false);
+                    let (picked, skipped) = expand(self, false);
+                    if skipped > 0 {
+                        push_log(self, format!("略過已完成 {} 課", skipped));
+                    }
                     if picked.is_empty() {
-                        push_log(self, "（沒有可跑的課程，請重載目錄）".into());
+                        push_log(self, "（選取的課本都已完成；要全部重跑按「▶▶ 跑全部」）".into());
                     } else {
                         self.running = true;
                         start_run(self.tx.clone(), self.stop.clone(), picked, self.pass);
@@ -391,8 +447,13 @@ impl eframe::App for App {
                     .add_enabled(!self.running && qn > 0, egui::Button::new(format!("▶ 跑佇列（{qn}）")))
                     .clicked()
                 {
-                    let picked = expand(self, true);
-                    if !picked.is_empty() {
+                    let (picked, skipped) = expand(self, true);
+                    if skipped > 0 {
+                        push_log(self, format!("略過已完成 {} 課（佇列展開 {} 課）", skipped, picked.len() + skipped));
+                    }
+                    if picked.is_empty() {
+                        push_log(self, "（佇列中的課本都已完成；要全部重跑按「▶▶ 跑全部」）".into());
+                    } else {
                         self.running = true;
                         start_run(self.tx.clone(), self.stop.clone(), picked, self.pass);
                     }
@@ -454,9 +515,11 @@ impl eframe::App for App {
                             let mut checked = queued;
                             if ui.checkbox(&mut checked, "").clicked() {
                                 if checked {
-                                    self.queue.insert(i);
+                                    if !self.queue.contains(&i) {
+                                        self.queue.push(i);
+                                    }
                                 } else {
-                                    self.queue.remove(&i);
+                                    self.queue.retain(|&x| x != i);
                                 }
                             }
                             let color = if queued {
@@ -477,10 +540,19 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 ui.label(&self.status);
                 ui.separator();
+                let acc = match &self.myet_hours {
+                    Some(h) => format!("MyET 累計 {:.1} 小時", h),
+                    None => format!("累計 {:.1} 小時（本機）", self.total_secs as f64 / 3600.0),
+                };
                 if self.avg_n > 0 {
-                    ui.label(format!("完成 {} 句  平均 {:.1}", self.done, self.avg_sum / self.avg_n as f64));
+                    ui.label(format!(
+                        "完成 {} 句  平均 {:.1}  {}",
+                        self.done,
+                        self.avg_sum / self.avg_n as f64,
+                        acc
+                    ));
                 } else {
-                    ui.label(format!("完成 {} 句", self.done));
+                    ui.label(format!("完成 {} 句  {}", self.done, acc));
                 }
                 if self.running {
                     ui.spinner();

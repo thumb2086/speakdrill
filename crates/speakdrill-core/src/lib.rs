@@ -10,6 +10,7 @@ pub mod per_app;
 pub mod pipeline;
 pub mod piper;
 pub mod setup;
+pub mod stats;
 pub mod tts;
 pub mod vm;
 
@@ -20,9 +21,10 @@ pub use audio::AudioPlayer;
 pub use cdp::Cdp;
 pub use config::{Config, KNOWN_CODENAMES, all_codenames};
 pub use lesson::{fetch_all_catalogs, fetch_catalog, fetch_lines, scoring_query, scoring_url, LessonRef, Line};
+pub use stats::{MyetStats, fetch_myet_stats};
 pub use pipeline::{
-    ensure_logged_in, ensure_tts, run_lesson, save_report, LessonReport, LineScore, Progress,
-    RunOptions, SilentProgress,
+    ensure_logged_in, ensure_tts, run_lesson, save_report, totals_add, totals_get, LessonReport,
+    LineScore, Progress, RunOptions, SilentProgress,
 };
 pub use tts::{TtsConfig, TtsEngine};
 pub use vm::Vm;

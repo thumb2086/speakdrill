@@ -37,7 +37,7 @@ pub struct Cdp {
     _reader: tokio::task::JoinHandle<()>,
 }
 
-fn http_get(host: &str, port: u16, path: &str) -> Result<String> {
+pub(crate) fn http_request(method: &str, host: &str, port: u16, path: &str) -> Result<String> {
     use std::io::{Read, Write};
     use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 
@@ -69,7 +69,7 @@ fn http_get(host: &str, port: u16, path: &str) -> Result<String> {
             let _ = s.set_write_timeout(Some(std::time::Duration::from_millis(1500)));
             if write!(
                 s,
-                "GET {path} HTTP/1.1\r\nHost: {h}:{port}\r\nConnection: close\r\n\r\n"
+                "{method} {path} HTTP/1.1\r\nHost: {h}:{port}\r\nConnection: close\r\n\r\n"
             )
             .is_err()
             {
@@ -107,9 +107,18 @@ fn http_get(host: &str, port: u16, path: &str) -> Result<String> {
 impl Cdp {
     /// 連上既有的 debug port，挑第一個 `type == "page"` 的 target。
     pub async fn connect(host: &str, port: u16) -> Result<Self> {
+        Self::connect_with(host, port, None).await
+    }
+
+    /// 連到 URL 包含 match_url 的 page target（讀背景統計用，不影響課堂分頁）
+    pub async fn connect_to_url(host: &str, port: u16, match_url: &str) -> Result<Self> {
+        Self::connect_with(host, port, Some(match_url)).await
+    }
+
+    async fn connect_with(host: &str, port: u16, match_url: Option<&str>) -> Result<Self> {
         let body = tokio::task::spawn_blocking({
             let host = host.to_string();
-            move || http_get(&host, port, "/json/list")
+            move || http_request("GET", &host, port, "/json/list")
         })
         .await??;
 
@@ -117,7 +126,12 @@ impl Cdp {
         let arr = list.as_array().ok_or_else(|| anyhow!("debug port 回應不是陣列"))?;
         let page = arr
             .iter()
-            .find(|t| t.get("type").and_then(|v| v.as_str()) == Some("page"))
+            .find(|t| {
+                t.get("type").and_then(|v| v.as_str()) == Some("page")
+                    && match_url
+                        .map(|m| t.get("url").and_then(|u| u.as_str()).unwrap_or("").contains(m))
+                        .unwrap_or(true)
+            })
             .ok_or_else(|| anyhow!("找不到 page target，MyET 可能還沒開好"))?;
 
         let ws_url = page
@@ -205,7 +219,7 @@ impl Cdp {
     pub async fn check_myet_running(host: &str, port: u16) -> bool {
         match tokio::task::spawn_blocking({
             let host = host.to_string();
-            move || http_get(&host, port, "/json/list")
+            move || http_request("GET", &host, port, "/json/list")
         })
         .await
         {
