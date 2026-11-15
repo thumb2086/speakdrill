@@ -116,7 +116,12 @@ pub async fn fetch_all_catalogs(
             }
         }
     }
-    
+
+    // 跨 CodeName 的目錄會回傳重複內容（例如 BKM_3A 是整個系列的聯集），
+    // 同一 lesson_id 只保留第一份，避免把 204 課算成 385 課
+    let mut seen = std::collections::HashSet::new();
+    all_lessons.retain(|l| seen.insert(l.lesson_id.clone()));
+
     Ok(all_lessons)
 }
 
