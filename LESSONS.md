@@ -119,7 +119,17 @@ v0.2.14 的事故就是在第 3 步缺席的情況下發布的。**不准跳過�
 
 ---
 
-## 7. 小結（每條一行版）
+## 7. commit message 暫存檔不要放 repo 根目錄（連犯兩次）
+
+**事故**：`git add -A` 把 `.thumb-work-commit.txt`／`commitmsg.txt` 一起提交進 repo
+（v0.2.24 發布與本次 refactor 各一次），事後只能再補一個 `git rm` 的 chore commit 清掉。
+
+**規則**：
+1. commit message 暫存檔一律寫到 `C:\Users\CPXru\.thumb-work\`，**不要**放在 repo 根目錄。
+2. `git add` 用明確路徑（`git add README.md crates/...`），**不要用 `git add -A`**。
+3. 「先 `add` 再 `Remove-Item` 暫存檔」的順序必然踩雷，直接把暫存檔放 repo 外才一勞永逸。
+
+## 8. 小結（每條一行版）
 
 | # | 一句話 |
 |---|---|
@@ -129,3 +139,4 @@ v0.2.14 的事故就是在第 3 步缺席的情況下發布的。**不准跳過�
 | 4 | commit message 含雙引號／反斜線 → 寫檔 + `git commit -F`；tag 指錯 → `push --force` |
 | 5 | 依賴 App 畫面文字的判斷：寬鬆匹配 + 多候選按鈕 + 除錯輸出 |
 | 6 | 除錯順序：doctor → DEBUG run → 依 [cd]/▶/✗ 定位層次 → 修 → 重跑驗收 |
+| 7 | commit message 暫存檔寫到 `.thumb-work\`，`git add` 用明確路徑不用 `-A` |
