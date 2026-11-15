@@ -84,5 +84,14 @@
   - list 去重 commit 67edce2：fetch_all_catalogs 同一 lesson_id 只保留第一份 → list 385 → 204
   - TUI/GUI 佇列改 Vec 保留勾選順序（原 HashSet 隨機）；Enter 跑佇列/跑選取略過已完成課並顯示略過數
   - v0.2.26 CI (run 43761074229)：verify/build/npm 全部通過；`npm i -g speakdrill@latest` → v0.2.26；doctor 全部正常
+- [2026-11-16] checkpoint11：v0.2.27（GUI 啟動 MyET 按鈕）+ v0.2.28（init 自動綁麥克風）發布 ✅
+  - v0.2.27：GUI 新增「🚀 啟動 MyET」按鈕（--remote-debugging-port=9222 --remote-allow-origins=*），與 TUI m 鍵一致；
+    MyetStats 讀取完成前顯示「累計 …」（不再先閃本機 0.0）；
+    v0.2.27 CI (43762177788) ✓；npm latest
+  - v0.2.28：`speakdrill init` 最後一步自動呼叫 setup（registry → COM → UIA），已綁定直接結束；
+    修正 setup 順序 bug（registry 已綁定但 MyET 未執行時不再白開 ms-settings 視窗）；
+    TUI footer 補上 r 重載 / m 啟動 MyET / s 停止 提示；README / npm README 安裝流程更新；
+    v0.2.28 CI (43762953986)：verify/build/npm ✓；`npm i -g` → 0.2.28
+  - npm 安裝被舊 TUI 行程（pid 41860，鎖住 speakdrill.exe）擋下 EBUSY → 關閉該行程後安裝成功
 - Status: completed
-- Updated: 2026-11-15T18:55:00+08:00
+- Updated: 2026-11-16T05:30:00+08:00
