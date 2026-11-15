@@ -75,5 +75,14 @@
   - README：硬體需求章節、移除 c 與不存在的 Shift+Space 說明
   - v0.2.25 CI (run 43748327579)：verify/build/npm 全部通過；`npm i -g speakdrill@latest` → v0.2.25；`doctor` 全部正常
   - 使用者確認：「我覺得ok了」→ 發 v0.2.25
+- [2026-11-15] checkpoint10：v0.2.26 發布（MyET 官方累計時數 + 佇列修正）✅
+  - 新功能：TUI 標題列 / GUI 狀態列顯示 MyET 官方累計學習時數（學習顧問室 Dashboard.aspx 的「學習時間」）
+  - 實作：fetch_myet_stats() — 直接連當前頁 → 導航 Dashboard.aspx → 讀 innerText → 導回原頁；
+    背景/前景分頁（/json/new）不可靠（CEF 新分頁不導航），改走 CDP 導航現有頁面
+  - 實測：Rust e2e 讀回 MyetStats { hours: 15.2, LV 44, 證書 16 }；parse 有 2 個單元測試
+  - 讀取失敗退回本機累計（totals.json，save_report 每課累加 elapsed_secs）
+  - list 去重 commit 67edce2：fetch_all_catalogs 同一 lesson_id 只保留第一份 → list 385 → 204
+  - TUI/GUI 佇列改 Vec 保留勾選順序（原 HashSet 隨機）；Enter 跑佇列/跑選取略過已完成課並顯示略過數
+  - v0.2.26 CI (run 43761074229)：verify/build/npm 全部通過；`npm i -g speakdrill@latest` → v0.2.26；doctor 全部正常
 - Status: completed
 - Updated: 2026-11-15T18:55:00+08:00
