@@ -304,6 +304,29 @@ fn start_setup(tx: Sender<Ev>) {
     });
 }
 
+/// 安裝 VB-CABLE 虛擬音效驅動；需管理員權限，安裝後需重開機
+fn start_install_driver(tx: Sender<Ev>) {
+    std::thread::spawn(move || {
+        let tx_log = tx.clone();
+        let _ = tx_log.send(Ev::Log("== 安裝 VB-CABLE 虛擬音效驅動 ==".into()));
+        let _ = tx_log.send(Ev::Log("需要管理員權限（UAC），安裝後必須重開機才能生效".into()));
+        let res = speakdrill_core::devices::install_vb_cable(&mut |m| {
+            let _ = tx_log.send(Ev::Log(m.to_string()));
+        });
+        match res {
+            Ok(()) => {
+                let _ = tx_log.send(Ev::Log("✓ VB-CABLE 安裝完成".into()));
+                let _ = tx_log.send(Ev::Log("⚠ 安裝後必須重開機才能生效（Windows 核心驅動限制）".into()));
+                let _ = tx_log.send(Ev::Log("重開機後請再跑一次 `speakdrill init`".into()));
+            }
+            Err(e) => {
+                let _ = tx_log.send(Ev::Log(format!("⚠ 安裝失敗：{e}")));
+                let _ = tx_log.send(Ev::Log("請自行從 https://vb-audio.com/Cable/ 下載並安裝".into()));
+            }
+        }
+    });
+}
+
 /// 把選中的課本索引展開為待跑課程（保留勾選順序，略過已完成）
 fn expand_coursebooks(app: &App, selected: &[usize]) -> (Vec<LessonRef>, usize) {
     let mut picked = Vec::new();
@@ -624,6 +647,10 @@ impl eframe::App for App {
                     push_log(self, "... 啟動 MyET（debug port 9222）".into());
                     start_myet(self.tx.clone());
                 }
+                if ui.add_enabled(!self.running, egui::Button::new("🔧 安裝虛擬音效驅動")).clicked() {
+                    push_log(self, "... 安裝 VB-CABLE（需管理員、重開機）".into());
+                    start_install_driver(self.tx.clone());
+                }
                 ui.separator();
                 if ui.add_enabled(!self.setup_busy, egui::Button::new("🔧 自動設定音訊")).clicked() {
                     self.setup_busy = true;
@@ -636,6 +663,13 @@ impl eframe::App for App {
                 ui.separator();
                 ui.label("及格分");
                 ui.add(egui::Slider::new(&mut self.pass, 50..=100));
+                ui.separator();
+                let vroute = if speakdrill_core::devices::has_vb_cable() {
+                    "虛擬迴路：VB-CABLE ✓"
+                } else {
+                    "虛擬迴路：未偵測（點上方按鈕安裝）"
+                };
+                ui.label(vroute);
             });
         });
 

@@ -231,8 +231,34 @@ async fn cmd_init(
         }
         None => {
             println!("  ⚠ 沒有可用的虛擬音效迴路");
-            println!("    加 --install-driver 安裝 VB-CABLE，或自行安裝 VoiceMeeter");
-            println!("    若已安裝但被其他程式佔用，請重開機後再跑 init");
+            println!("  程式需要一個「虛擬音效迴路」把 TTS 播放聲音變成麥克風輸入。");
+            println!("  Windows 沒有 user-mode 建立麥克風的方法，必須裝虛擬音效驅動。");
+            println!();
+            println!("  支援兩種：");
+            println!("    1. VB-CABLE（推薦，1.3 MB，零設定）");
+            println!("    2. VoiceMeeter（Banana / Potato，~30 MB，需自行設定路由）");
+            println!();
+            print!("  要現在自動安裝 VB-CABLE 嗎？需要管理員權限（UAC），安裝後必須重開機 [Y/n] ");
+            use std::io::{self, Write};
+            io::stdout().flush().ok();
+            let mut input = String::new();
+            io::stdin().read_line(&mut input).ok();
+            let input = input.trim().to_lowercase();
+            if input.is_empty() || input == "y" || input == "yes" {
+                println!("  正在下載並安裝 VB-CABLE…");
+                if let Err(e) = speakdrill_core::devices::install_vb_cable(&mut |m| println!("  {m}")) {
+                    println!("  ⚠ 安裝失敗：{e}");
+                    println!("  請自行從 https://vb-audio.com/Cable/ 下載並安裝");
+                } else {
+                    println!("  ✓ VB-CABLE 安裝完成");
+                    println!("  ⚠ 安裝後必須重開機才能生效（Windows 核心驅動限制）");
+                    println!("  重開機後請再跑一次 `speakdrill init`");
+                    return Ok(());
+                }
+            } else {
+                println!("  已取消。請自行安裝 VB-CABLE 或 VoiceMeeter，裝完重開機後再跑 init");
+                return Ok(());
+            }
         }
     }
 
