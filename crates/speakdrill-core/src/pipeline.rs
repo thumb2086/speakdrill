@@ -470,7 +470,7 @@ pub fn check_app_binding(cfg: &Config, force: bool, p: &mut dyn Progress) -> Res
 
         let Some(bind) = crate::binding::app_mic_binding(&cfg.app_exe) else {
             p.log(&format!("⚠ 找不到「{}」的 per-app 麥克風設定", cfg.app_exe));
-            p.log(&format!("  請到 ms-settings:apps-volume 把它設成「{}」", route.mic_device));
+            p.log(&format!("  請跑 speakdrill setup 自動綁定（或手動 ms-settings:apps-volume → 輸入裝置選「{}」）", route.mic_device));
             if force {
                 return Ok(());
             }
@@ -489,7 +489,7 @@ pub fn check_app_binding(cfg: &Config, force: bool, p: &mut dyn Progress) -> Res
                 p.log(&format!("  App 目前聽：{}", g));
                 p.log(&format!("  我們播到  ：{}", expected));
                 p.log(&format!(
-                    "  修正：ms-settings:apps-volume → {} → 輸入裝置選「{}」",
+                    "  修正：speakdrill setup 自動綁定（或手動 ms-settings:apps-volume → {} → 輸入裝置選「{}」）",
                     cfg.app_exe, route.mic_device
                 ));
                 if force {

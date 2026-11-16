@@ -20,7 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// 一次性設定：偵測裝置、寫設定、設 VoiceMeeter 路由與音量
+    /// 一次性設定：偵測裝置、寫設定、設 VoiceMeeter 路由與音量、自動綁 per-app 麥克風
     Init {
         #[arg(long)] device: Option<String>,
         #[arg(long)] server: Option<String>,
@@ -28,7 +28,7 @@ enum Cmd {
         /// 找不到虛擬音效裝置時，自動下載並安裝 VB-CABLE（會跳 UAC）
         #[arg(long)] install_driver: bool,
     },
-    /// 檢查環境（port / 登入 / 裝置 / VoiceMeeter / TTS）
+    /// 檢查環境（port / 登入 / 裝置 / VoiceMeeter / TTS / 麥克風綁定）
     Doctor,
     /// 還原：停止把 TTS 送到 B1，並印出如何清掉 per-app 裝置設定
     Reset {
@@ -359,7 +359,7 @@ async fn cmd_doctor() -> Result<()> {
                                 println!("      目前綁定：{}", g);
                             }
                             println!(
-                                "      修正：ms-settings:apps-volume → {} → 輸入裝置選「{}」",
+                                "      修正：speakdrill setup 自動綁定（或手動 ms-settings:apps-volume → {} → 輸入裝置選「{}」）",
                                 cfg.app_exe, r.mic_device
                             );
                             bad += 1;
@@ -368,7 +368,7 @@ async fn cmd_doctor() -> Result<()> {
                     None => {
                         println!("✗ 找不到 {} 的 per-app 設定", cfg.app_exe);
                         println!(
-                            "      請到 ms-settings:apps-volume 把輸入裝置設成「{}」",
+                            "      請跑 speakdrill setup 自動綁定（或手動 ms-settings:apps-volume → 輸入裝置選「{}」）",
                             r.mic_device
                         );
                         bad += 1;
