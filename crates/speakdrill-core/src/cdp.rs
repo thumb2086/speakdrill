@@ -267,6 +267,29 @@ impl Cdp {
         })).await.is_ok()
     }
 
+    /// 等 MyET 頁面載入完成（readyState=complete 且 URL 在 AudreyWeb 下）。
+    /// MyET 開機比 CDP port 好得晚，提早抓目錄會拿到未載入的頁面（積分全空）。
+    /// 回傳是否等到；逾時也不致命，呼叫端照常試抓（好過什麼都不做）。
+    pub async fn wait_page_ready(&self, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Ok(state) = self
+                .eval_string("document.readyState + '|' + location.href")
+                .await
+            {
+                if let Some((rs, href)) = state.split_once('|') {
+                    if rs.trim() == "complete" && href.contains("AudreyWeb") {
+                        return true;
+                    }
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    }
+
     /// 重新連線到 CDP
     pub async fn reconnect(&mut self, host: &str, port: u16) -> Result<()> {
         *self = Self::connect(host, port).await?;

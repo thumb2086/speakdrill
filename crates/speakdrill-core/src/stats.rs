@@ -24,24 +24,51 @@ pub fn dashboard_url(server: &str) -> String {
     format!("{}/AudreyWeb/Dashboard.aspx", server.trim_end_matches('/'))
 }
 
+/// 直接讀 Dashboard.aspx DOM 元素 id（頁面是先畫 placeholder、JS 非同步填值，
+/// 讀 innerText 會在填值前搶到「0.0 分 / 空」的 placeholder）
+/// 回傳 (學習時間值, 單位, 證書數, LV)；欄位還是 placeholder（空字串）代表「還沒填完」
+async fn read_stats_dom(cdp: &crate::cdp::Cdp) -> Option<(String, String, String, String)> {
+    let js = r#"(() => {
+        const g = id => { const e = document.getElementById(id); return e ? (e.textContent || '').trim() : ''; };
+        return [
+            g('lblLearnTimeValue'), g('lblLearnTimeUnit'),
+            g('divCertificateValue'), g('lblExpValue')
+        ].join('|');
+    })()"#;
+    let raw = cdp.eval_string(js).await.ok()?;
+    let parts: Vec<&str> = raw.split('|').collect();
+    if parts.len() != 4 {
+        return None;
+    }
+    Some((parts[0].into(), parts[1].into(), parts[2].into(), parts[3].into()))
+}
+
 /// 讀取 MyET 官方累計學習時數；失敗回傳 Err（呼叫端可退回本機累計）
 pub async fn fetch_myet_stats(server: &str, port: u16) -> Result<MyetStats> {
     let host = "127.0.0.1";
     let cdp = crate::cdp::Cdp::connect(host, port).await?;
     let original_url = cdp.target_url.clone();
 
+    // MyET 開機比 CDP port 好得晚；先等頁面真的載入完成再導航，否則會讀到載入中的儀表板（0.0 小時）
+    let _ = cdp.wait_page_ready(std::time::Duration::from_secs(30)).await;
+
     // 導航到 Dashboard.aspx（此頁面顯示 累積 時數 / LV / 證書）
     cdp.navigate(&dashboard_url(server)).await?;
 
-    // 等 innerText 填上「學習時間」（非同步內容，最多 8 秒）
-    let mut text = String::new();
-    for _ in 0..16 {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        if let Ok(t) = cdp.body_text().await {
-            text = t;
-            if text.contains("學習時間") {
+    // 輪詢直到 JS 把官方數字填完（placeholder 是：時間 "0.0"、單位"分"、證書空、LV 空）
+    let mut dom_val: Option<(String, String, String, String)> = None;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        if let Some(v) = read_stats_dom(&cdp).await {
+            let (learn_time, _unit, certs, lv) = &v;
+            // 證書/LV 是 placeholder 時為空字串；時間"0.0"+單位"分"無法分辨是否填完，
+            // 用「證書與 LV 皆非空」作為填完訊號（真實 0 值也會填成 "0"）
+            let filled = !certs.is_empty() && !lv.is_empty() && !learn_time.is_empty();
+            if filled {
+                dom_val = Some(v);
                 break;
             }
+            dom_val = Some(v); // 繼續等，但先保留最新一份
         }
     }
 
@@ -50,10 +77,40 @@ pub async fn fetch_myet_stats(server: &str, port: u16) -> Result<MyetStats> {
         let _ = cdp.navigate(&original_url).await;
     }
 
+    if let Some((learn_time, unit, certs, lv)) = dom_val {
+        if !certs.is_empty() && !lv.is_empty() {
+            let hours = parse_f64(&learn_time).unwrap_or(0.0);
+            let hours = if unit.trim() == "分" { hours / 60.0 } else { hours };
+            let certs = certs.parse::<u64>().ok();
+            let lv = lv.parse::<u64>().ok().map(|n| format!("LV {n}"));
+            return Ok(MyetStats { hours, level: lv, certs });
+        }
+    }
+
+    // DOM 讀不到 → 退回 innerText + regex 解析（page 結構若不同時的保底）
+    let mut text = String::new();
+    for _ in 0..8 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        if let Ok(t) = cdp.body_text().await {
+            text = t;
+            if text.contains("學習時間") {
+                break;
+            }
+        }
+    }
     if text.is_empty() {
         return Err(anyhow!("讀不到 Dashboard.aspx 內容"));
     }
     parse_myet_stats(&text)
+}
+
+fn parse_f64(s: &str) -> Option<f64> {
+    s.trim()
+        .trim_end_matches('時')
+        .trim_end_matches('分')
+        .trim()
+        .parse::<f64>()
+        .ok()
 }
 
 fn parse_myet_stats(text: &str) -> Result<MyetStats> {

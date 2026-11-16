@@ -80,7 +80,25 @@ pub async fn fetch_catalog_opts(
         }
     }
 
+    let _ = cdp.wait_page_ready(std::time::Duration::from_secs(30)).await;
     let mut lessons = fetch_catalog_live(cdp, server, code, content_type).await?;
+
+    // 不讓劣化結果蓋掉有成績的快取：新抓的 0 個有成績、舊快取 ≥1 個 → 保留舊快取
+    // （refresh=true 代表使用者強制重抓，不套用）
+    if !refresh {
+        if let Ok(s) = std::fs::read_to_string(&cache) {
+            if let Ok(old) = serde_json::from_str::<CatalogCache>(&s) {
+                let old_scored = old.lessons.iter().filter(|l| l.best_score.is_some()).count();
+                let new_scored = lessons.iter().filter(|l| l.best_score.is_some()).count();
+                if old_scored > 0 && new_scored == 0 {
+                    eprintln!(
+                        "⚠ 本次抓到 0 個有成績的課程，保留舊快取（{old_scored} 個有成績）"
+                    );
+                    return Ok(with_code(old.lessons, code));
+                }
+            }
+        }
+    }
     with_code_mut(&mut lessons, code);
 
     if let Ok(s) = serde_json::to_string(&CatalogCache {
