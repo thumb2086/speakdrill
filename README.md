@@ -102,9 +102,9 @@ speakdrill init --device "Voicemeeter Input" --server https://140.125.168.213 --
 
 | 項目 | 說明 |
 |---|---|
-| VoiceMeeter 路由 | 只有 TTS 那條 strip 送到 B1，其他關掉 |
-| **B1 裝置音量** | 預設竟然是 **24.3%**，會讓評分引擎判「太小聲」。自動拉到 100% |
-| 播放裝置音量 | 同樣拉到 100% |
+| VoiceMeeter 路由 | 只有 TTS 那條 strip 送到 B1，其他關掉（VoiceMeeter 路線） |
+| 播放裝置音量 | 拉到 100% |
+| **錄音裝置音量**（CABLE Output／Voicemeeter Out B1） | 拉到 100%（B1 預設 24.3% 會讓評分引擎判「太小聲」，v0.2.33 起 VB-CABLE 也一起拉） |
 | TTS 引擎 | 自動下載 Piper（單一 exe，不需要 Python） |
 | **per-app 麥克風綁定** | 自動跑 `speakdrill setup`（registry → COM → UIA），無需手動；失敗時才印手動步驟 |
 

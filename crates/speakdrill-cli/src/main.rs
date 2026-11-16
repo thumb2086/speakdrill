@@ -236,12 +236,14 @@ async fn cmd_init(
     println!("\n[4/6] Windows 裝置音量");
     #[cfg(windows)]
     {
-        // 只在 VoiceMeeter 路線時設定 B1 音量
-        if cfg.play_device.to_lowercase().contains("voicemeeter") {
-            match speakdrill_core::winvol::set_volume("Voicemeeter Out B1", true, 1.0) {
-                Ok(n) => println!("  錄音裝置 B1：{n} 個已設 100%"),
-                Err(e) => println!("  ⚠ B1 音量：{e}"),
-            }
+        // 不管哪條路線，都把「模擬麥克風」端拉滿（VB-CABLE 是 CABLE Output，VoiceMeeter 是 Voicemeeter Out B1）
+        let routes = speakdrill_core::devices::routes();
+        match routes.iter().find(|r| r.play_device == cfg.play_device) {
+            Some(r) => match speakdrill_core::winvol::set_volume(&r.mic_device, true, 1.0) {
+                Ok(n) => println!("  錄音裝置 {}：{n} 個已設 100%", r.mic_device),
+                Err(e) => println!("  ⚠ 錄音裝置 {} 音量：{e}", r.mic_device),
+            },
+            None => println!("  （找不到對應的錄音迴路，略過錄音裝置音量）"),
         }
         match speakdrill_core::winvol::set_volume(&cfg.play_device, false, 1.0) {
             Ok(n) => println!("  播放裝置：{n} 個已設 100%"),
@@ -275,6 +277,7 @@ async fn cmd_init(
     }
     #[cfg(not(windows))]
     println!("  非 Windows，略過");
+    println!("\n✓ init 完成。下一步：speakdrill doctor（檢查環境）→ speakdrill（開始練習）");
     Ok(())
 }
 

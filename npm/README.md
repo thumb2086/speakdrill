@@ -35,6 +35,7 @@ speakdrill doctor
 - **`speakdrill run --lesson <ID> --course <ID>`**：不用指定 CodeName，會自動從目錄定位課程所屬的那本
 - **跑到一半想加課本**：批次執行中按 `Space` 勾選，本批課程跑完會自動接續跑（TUI 標題顯示「追加 N 本」）；GUI 相同（執行中勾選即追加）
 - **目錄快取**：10 分鐘內的目錄直接從快取讀；抓到 0 個有成績時不會覆蓋舊快取
+- **init 會拉滿兩邊音量**：播放端（CABLE Input／Voicemeeter Input）與錄音端（CABLE Output／Voicemeeter Out B1），避免評分引擎判「太小聲」
 
 
 
