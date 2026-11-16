@@ -43,6 +43,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          # 固定 shared-key：Cargo.lock 隨版本 bump 而變，預設 key 會讓每次 release 全量重編
+          shared-key: speakdrill-release
 
       - name: Build (CLI + GUI)
         run: cargo build --release -p speakdrill-cli -p speakdrill-gui

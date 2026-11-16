@@ -135,7 +135,7 @@ fn build_status(app: &App) -> String {
         "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into()
     } else {
         format!(
-            "{} 本課本（{}）  ↑/↓ 移動 · Space 勾選/追加 · Enter 執行（{}）· a 全選 · x 清空 · b 全部 · r 重載 · m 啟動 MyET · s 停止 · PgUp/PgDn 捲動 · End 回最新 · q 離開",
+            "{} 本課本（{}）  ↑/↓ 移動 · Space 勾選/追加 · Enter 執行（{}）· i 課本內容 · a 全選 · x 清空 · b 全部 · r 重載 · m 啟動 MyET · s 停止 · PgUp/PgDn 捲動 · End 回最新 · q 離開",
             app.coursebooks.len(),
             if queued > 0 { format!("已勾 {queued} 本") } else { "Enter 跑單一課本".to_string() },
             if queued > 0 { "佇列" } else { "選取" },
@@ -146,9 +146,9 @@ fn build_status(app: &App) -> String {
 /// 互動式 App 狀態
 struct App {
     /// 所有課程（lesson_id, course_id）
-    lessons: Vec<(String, String, String)>,
-    /// 課本清單：(CodeName, 顯示名稱, [(lesson_id, course_id, code)])
-    coursebooks: Vec<(String, String, Vec<(String, String, String)>)>,
+    lessons: Vec<(String, String, String, String)>,
+    /// 課本清單：(CodeName, 顯示名稱, [(lesson_id, course_id, code, title)])
+    coursebooks: Vec<(String, String, Vec<(String, String, String, String)>)>,
     /// 佇列：課本索引（Vec 保留勾選順序）
     queue: Vec<usize>,
     /// 已完成的課程 ID
@@ -412,6 +412,21 @@ fn event_loop(
                                 start_batch(app, rt, tx.clone(), stop.clone(), picked);
                             }
                         }
+                        KeyCode::Char('i') if !app.coursebooks.is_empty() => {
+                            // 顯示課本內容（單元名 + 課號），讓「選的課本」與「跑的課」一眼對得上
+                            let mut lines = Vec::new();
+                            if let Some((code, name, lessons)) = app.coursebooks.get(app.sel) {
+                                lines.push(format!("── {} {} 課程列表（{}）──", code, name, lessons.len()));
+                                for (lid, _, _, title) in lessons {
+                                    let mark = if app.completed.contains(lid) { "✓" } else { " " };
+                                    lines.push(format!("  {mark} {}", lesson_label(lid, title)));
+                                }
+                                lines.push("── Enter 開始 ──".to_string());
+                            }
+                            for l in lines {
+                                push_log(app, l);
+                            }
+                        }
                         KeyCode::Char('b') | KeyCode::Char('B') if !app.running && !app.lessons.is_empty() => {
                             let all = app.lessons.clone();
                             start_batch(app, rt, tx.clone(), stop.clone(), all);
@@ -427,7 +442,7 @@ fn start_batch(
     rt: &tokio::runtime::Runtime,
     tx: UnboundedSender<Ev>,
     stop: Arc<AtomicBool>,
-    lessons: Vec<(String, String, String)>,
+    lessons: Vec<(String, String, String, String)>,
 ) {
     // 清除先前中止請求，讓停止按鈕可重複使用
     stop.store(false, Ordering::Relaxed);
@@ -466,11 +481,11 @@ fn start_batch(
             }
         }
 
-        for (lesson, course, code) in lessons {
+        for (lesson, course, code, title) in lessons {
             if stop.load(Ordering::Relaxed) {
                 break;
             }
-            let _ = tx.send(Ev::LessonStart(lesson.clone()));
+            let _ = tx.send(Ev::LessonStart(lesson_label(&lesson, &title)));
             let mut p = ChannelProgress { tx: tx.clone(), stop: stop.clone() };
             match run_lesson(&cdp, &cfg, &player, &lesson, &course, &code, &RunOptions::default(), &mut p).await {
                 Ok(r) => {
@@ -485,18 +500,28 @@ fn start_batch(
         let _ = tx.send(Ev::BatchDone);
     });
 }
+/// 課程的人類可讀標籤：單元名稱優先，id 當後括號；沒有單元名就只印 id
+fn lesson_label(id: &str, title: &str) -> String {
+    let t = title.trim();
+    if t.is_empty() || t == id {
+        id.to_string()
+    } else {
+        format!("{t}（{id}）")
+    }
+}
+
 /// 把選中的課本索引展開為待跑課程列表（保留勾選順序，略過已完成）
-/// 回傳：(待跑課程 (lesson_id, course_id, code), 略過數)
-fn expand_picked(app: &App, selected: &[usize]) -> (Vec<(String, String, String)>, usize) {
+/// 回傳：(待跑課程 (lesson_id, course_id, code, title), 略過數)
+fn expand_picked(app: &App, selected: &[usize]) -> (Vec<(String, String, String, String)>, usize) {
     let mut picked = Vec::new();
     let mut skipped = 0usize;
     for &idx in selected {
         if let Some((_, _, lessons)) = app.coursebooks.get(idx) {
-            for (lid, cid, code) in lessons {
+            for (lid, cid, code, title) in lessons {
                 if app.completed.contains(lid) {
                     skipped += 1;
                 } else {
-                    picked.push((lid.clone(), cid.clone(), code.clone()));
+                    picked.push((lid.clone(), cid.clone(), code.clone(), title.clone()));
                 }
             }
         }
@@ -511,7 +536,7 @@ fn merge_catalog(app: &mut App, list: Vec<LessonRef>, replace: bool) {
         app.coursebooks.clear();
         app.lessons = list
             .iter()
-            .map(|l| (l.lesson_id.clone(), l.course_id.clone(), l.code.clone()))
+            .map(|l| (l.lesson_id.clone(), l.course_id.clone(), l.code.clone(), l.title.clone()))
             .collect();
     }
     for l in &list {
@@ -519,8 +544,8 @@ fn merge_catalog(app: &mut App, list: Vec<LessonRef>, replace: bool) {
             app.completed.insert(l.lesson_id.clone());
         }
         if !replace {
-            if !app.lessons.iter().any(|(id, _, _)| id == &l.lesson_id) {
-                app.lessons.push((l.lesson_id.clone(), l.course_id.clone(), l.code.clone()));
+            if !app.lessons.iter().any(|(id, _, _, _)| id == &l.lesson_id) {
+                app.lessons.push((l.lesson_id.clone(), l.course_id.clone(), l.code.clone(), l.title.clone()));
             }
         }
         // 按 course_id 前綴分組為課本（例：BKM-B2A-001 → BKM-B2A）
@@ -535,9 +560,9 @@ fn merge_catalog(app: &mut App, list: Vec<LessonRef>, replace: bool) {
             .find(|(code, _)| code.replace('_', "-B") == cb_key)
             .map(|(_, name)| name.to_string())
             .unwrap_or_else(|| cb_key.clone());
-        let triple = || (l.lesson_id.clone(), l.course_id.clone(), l.code.clone());
+        let triple = || (l.lesson_id.clone(), l.course_id.clone(), l.code.clone(), l.title.clone());
         if let Some(cb) = app.coursebooks.iter_mut().find(|(c, _, _)| c == &cb_key) {
-            if !cb.2.iter().any(|(id, _, _)| id == &l.lesson_id) {
+            if !cb.2.iter().any(|(id, _, _, _)| id == &l.lesson_id) {
                 cb.2.push(triple());
             }
         } else {
@@ -572,7 +597,7 @@ fn apply(app: &mut App, ev: Ev) {
             app.avg_sum += s.total as f64;
             app.avg_n += 1;
         }
-        Ev::LessonStart(l) => push_log(app, format!("=== {l} ===")),
+        Ev::LessonStart(l) => push_log(app, format!("▶ {l}")),
         Ev::LessonDone(r) => {
             app.completed.insert(r.lesson_id.clone());
             app.total_secs += r.elapsed_secs;
@@ -688,7 +713,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
         .enumerate()
         .map(|(i, (code, name, lessons))| {
             let total = lessons.len();
-            let done = lessons.iter().filter(|(id, _, _)| app.completed.contains(id)).count();
+            let done = lessons.iter().filter(|(id, _, _, _)| app.completed.contains(id)).count();
             let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u32 } else { 0 };
             let mark = if app.queue.contains(&i) { "●" } else { " " };
             ListItem::new(TLine::from(format!("{} {}  {}  {}/{} ({:.0}%)", mark, code, name, done, total, pct)))

@@ -301,14 +301,24 @@ fn expand_coursebooks(app: &App, selected: &[usize]) -> (Vec<LessonRef>, usize) 
     (picked, skipped)
 }
 
-/// LessonRef 列表 → (lesson_id, course_id, code) 三元組（start_run 用）
-fn to_triples(v: &[LessonRef]) -> Vec<(String, String, String)> {
+/// 課程的人類可讀標籤：單元名稱優先，id 當後括號；沒有單元名就只印 id
+fn lesson_label(id: &str, title: &str) -> String {
+    let t = title.trim();
+    if t.is_empty() || t == id {
+        id.to_string()
+    } else {
+        format!("{t}（{id}）")
+    }
+}
+
+/// LessonRef 列表 → (lesson_id, course_id, code, title) 四元組（start_run 用）
+fn to_quads(v: &[LessonRef]) -> Vec<(String, String, String, String)> {
     v.iter()
-        .map(|l| (l.lesson_id.clone(), l.course_id.clone(), l.code.clone()))
+        .map(|l| (l.lesson_id.clone(), l.course_id.clone(), l.code.clone(), l.title.clone()))
         .collect()
 }
 
-fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<(String, String, String)>, pass: u32) {
+fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<(String, String, String, String)>, pass: u32) {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
@@ -335,11 +345,11 @@ fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<(String, String
                 }
             };
 
-            for (lesson_id, course_id, code) in lessons {
+            for (lesson_id, course_id, code, title) in lessons {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
-                let _ = tx.send(Ev::Log(format!("=== {} ===", lesson_id)));
+                let _ = tx.send(Ev::Log(format!("▶ {}", lesson_label(&lesson_id, &title))));
                 let mut p = ChannelProgress {
                     tx: tx.clone(),
                     stop: stop.clone(),
@@ -488,7 +498,7 @@ impl eframe::App for App {
                             );
                             self.status = format!("接續追加執行中（{} 課）", picked.len());
                             self.running = true;
-                            start_run(self.tx.clone(), self.stop.clone(), to_triples(&picked), self.pass);
+                            start_run(self.tx.clone(), self.stop.clone(), to_quads(&picked), self.pass);
                         }
                     }
                 }
@@ -519,6 +529,25 @@ impl eframe::App for App {
                 ui.heading(format!("MyET 口說自動練習  v{}", env!("CARGO_PKG_VERSION")));
                 ui.separator();
 
+                if ui.add_enabled(!self.running, egui::Button::new("📋 課本內容")).clicked() {
+                    if let Some((code, name, lessons)) = self.coursebooks.get(self.sel) {
+                        let mut lines = vec![format!("── {} {} 課程列表（{}）──", code, name, lessons.len())];
+                        for l in lessons {
+                            let mark = if self.completed.contains(&l.lesson_id) { "✓" } else { " " };
+                            let title = l.title.trim();
+                            let row = if title.is_empty() {
+                                format!("  {} {}", mark, l.lesson_id)
+                            } else {
+                                format!("  {} {}（{}）", mark, title, l.lesson_id)
+                            };
+                            lines.push(row);
+                        }
+                        lines.push("── ▶ 跑選取 開始 ──".to_string());
+                        for l in lines {
+                            push_log(self, l);
+                        }
+                    }
+                }
                 if ui.add_enabled(!self.running, egui::Button::new("▶ 跑選取")).clicked() {
                     let (picked, skipped) = expand(self, false);
                     if skipped > 0 {
@@ -528,7 +557,7 @@ impl eframe::App for App {
                         push_log(self, "（選取的課本都已完成；要全部重跑按「▶▶ 跑全部」）".into());
                     } else {
                         self.running = true;
-                        start_run(self.tx.clone(), self.stop.clone(), to_triples(&picked), self.pass);
+                        start_run(self.tx.clone(), self.stop.clone(), to_quads(&picked), self.pass);
                     }
                 }
                 let qn = self.queue.len();
@@ -545,7 +574,7 @@ impl eframe::App for App {
                     } else {
                         self.running = true;
                         self.queue.clear();
-                        start_run(self.tx.clone(), self.stop.clone(), to_triples(&picked), self.pass);
+                        start_run(self.tx.clone(), self.stop.clone(), to_quads(&picked), self.pass);
                     }
                 }
                 if ui.add_enabled(qn > 0, egui::Button::new("✖ 清佇列")).clicked() {
@@ -557,7 +586,7 @@ impl eframe::App for App {
                     .clicked()
                 {
                     self.running = true;
-                    let picked = to_triples(&self.lessons);
+                    let picked = to_quads(&self.lessons);
                     start_run(self.tx.clone(), self.stop.clone(), picked, self.pass);
                 }
                 if ui.add_enabled(self.running, egui::Button::new("■ 停止")).clicked() {
