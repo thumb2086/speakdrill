@@ -59,6 +59,7 @@ speakdrill-gui                   # 原生 GUI
 speakdrill run  --lesson <ID> --course <ID>
 speakdrill batch --code <CODE> --limit 5
 speakdrill reset                 # 還原音訊路由
+speakdrill update                # 檢查 npm 上的最新版＋顯示更新指令（自身不自動安裝）
 ```
 
 ## 前置需求

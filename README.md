@@ -244,6 +244,8 @@ speakdrill batch --code BKM_1A --start 10 --limit 3
 
 speakdrill reset                  # 停止把 TTS 送到 B1，並提示如何還原 per-app 設定
 speakdrill reset --yes            # 連設定檔一起刪
+
+speakdrill update                 # 檢查 npm 上的最新版，顯示更新指令（npm 不自動跑）
 ```
 
 輸出：

@@ -28,6 +28,8 @@ enum Cmd {
         /// 找不到虛擬音效裝置時，自動下載並安裝 VB-CABLE（會跳 UAC）
         #[arg(long)] install_driver: bool,
     },
+    /// 檢查 npm 上的最新版，並顯示更新指令（Windows 無法從程式內就地覆寫執行中的 exe，故只提示）
+    Update,
     /// 檢查環境（port / 登入 / 裝置 / VoiceMeeter / TTS / 麥克風綁定）
     Doctor,
     /// 還原：停止把 TTS 送到 B1，並印出如何清掉 per-app 裝置設定
@@ -110,6 +112,7 @@ fn main() -> Result<()> {
         Cmd::Init { device, server, code, install_driver } => {
             rt.block_on(cmd_init(device, server, code, install_driver))
         }
+        Cmd::Update => rt.block_on(cmd_update()),
         Cmd::Doctor => rt.block_on(cmd_doctor()),
         Cmd::Reset { yes } => rt.block_on(cmd_reset(yes)),
         Cmd::Run { lesson, course, resume, pass } => {
@@ -279,6 +282,73 @@ async fn cmd_init(
     println!("  非 Windows，略過");
     println!("\n✓ init 完成。下一步：speakdrill doctor（檢查環境）→ speakdrill（開始練習）");
     Ok(())
+}
+
+/// 比較兩個 x.y.z 版本字串（a > b 回傳 true）
+fn version_gt(a: &str, b: &str) -> bool {
+    let parse = |s: &str| {
+        s.trim()
+            .trim_start_matches('v')
+            .split('.')
+            .map(|p| p.trim().parse::<u64>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
+    let (a, b) = (parse(a), parse(b));
+    for i in 0..a.len().max(b.len()) {
+        let x = a.get(i).copied().unwrap_or(0);
+        let y = b.get(i).copied().unwrap_or(0);
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+/// `speakdrill update`：比對目前版本與 npm 上的最新版，印出更新指令
+/// （Windows 無法從程式內就地覆寫執行中的 exe，所以更新本身在程式外跑）
+async fn cmd_update() -> Result<()> {
+    let current = env!("CARGO_PKG_VERSION");
+    println!("目前版本：v{current}");
+    let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
+    let out = std::process::Command::new(npm).args(["view", "speakdrill", "version"]).output();
+    match out {
+        Ok(o) if o.status.success() => {
+            let latest = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if latest.is_empty() {
+                println!("⚠ 解析不到 npm 上的最新版本");
+                println!("手動更新：npm i -g speakdrill@latest");
+            } else if version_gt(&latest, current) {
+                println!("新版本可用：v{latest}");
+                println!();
+                println!("更新指令：");
+                println!("  npm i -g speakdrill@latest");
+                println!("（先關閉所有 speakdrill 視窗，避免 speakdrill.exe 被鎖住導致 EBUSY）");
+            } else {
+                println!("✓ 已是最新版");
+            }
+        }
+        _ => {
+            println!("⚠ 找不到 npm（或網路不通）");
+            println!("手動更新：npm i -g speakdrill@latest");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_gt;
+
+    #[test]
+    fn version_gt_works() {
+        assert!(version_gt("0.2.35", "0.2.34"));
+        assert!(version_gt("0.3.0", "0.2.99"));
+        assert!(version_gt("1.0.0", "0.99.9"));
+        assert!(version_gt("0.2.100", "0.2.99"));
+        assert!(!version_gt("0.2.35", "0.2.35"));
+        assert!(!version_gt("0.2.9", "0.2.35"));
+        assert!(!version_gt("0.2.35", "0.3.0"));
+    }
 }
 
 // ---------------- doctor ----------------
