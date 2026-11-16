@@ -115,5 +115,12 @@
     執行中日誌改顯示「▶ 單元名（課號）」；CI rust-cache 改 shared-key: speakdrill-release（Cargo.lock 隨版本變 → 每次全量重編 → 修正後增量快取）
   - 使用者回報「還是選的跟跑得不一樣」：查證實際 reports — 2B018~2B028 全部平均 86~90 ✓ CodeName 修正生效；
     只有 BKM-GAR-2B029 0 分（38 秒，title 空，極可能 MyET 被關/太早導航，可重跑）；user 困惑源於 GAR 課號不易辨識 → 以 i/📋 預覽解決
+- [2026-11-16] checkpoint15：v0.2.36（`speakdrill update` 指令）+ v0.2.37（進練習頁不再死等 10 秒）發布 ✅
+  - v0.2.36：新子指令 update — 比對目前版本與 npm registry 最新版（`npm view speakdrill version`），印更新指令；
+    不自動安裝（Windows exe 不能就地覆寫；EBUSY 已踩過兩次）；version_gt 有單元測試；實測 `speakdrill update` 輸出正確；
+    CI (43794644636) ✓；npm i -g → 0.2.36
+  - v0.2.37：進入 ScoringPage.aspx 後固定 sleep 10s → 1.5s（navigate() 已等 readyState=complete；console 事件有緩衝 — 10 秒純 padding）
+  - 使用者問「以他的判別，先掛機，時間會比較長嗎」— 指的就是這個 10 秒空跑
+  - 使用者機器 npm 鎖定問題頻繁（EBUSY）：v0.2.37 起全域更新改由使用者關 TUI 後自行 `npm i -g speakdrill@latest`（v0.2.36 已裝）
 - Status: completed
-- Updated: 2026-11-16T11:30:00+08:00
+- Updated: 2026-11-16T12:10:00+08:00
