@@ -283,7 +283,32 @@ fn start_setup(tx: Sender<Ev>) {
     });
 }
 
-fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<(String, String)>, pass: u32) {
+/// 把選中的課本索引展開為待跑課程（保留勾選順序，略過已完成）
+fn expand_coursebooks(app: &App, selected: &[usize]) -> (Vec<LessonRef>, usize) {
+    let mut picked = Vec::new();
+    let mut skipped = 0usize;
+    for &idx in selected {
+        if let Some((_, _, lessons)) = app.coursebooks.get(idx) {
+            for l in lessons {
+                if app.completed.contains(&l.lesson_id) {
+                    skipped += 1;
+                } else {
+                    picked.push(l.clone());
+                }
+            }
+        }
+    }
+    (picked, skipped)
+}
+
+/// LessonRef 列表 → (lesson_id, course_id, code) 三元組（start_run 用）
+fn to_triples(v: &[LessonRef]) -> Vec<(String, String, String)> {
+    v.iter()
+        .map(|l| (l.lesson_id.clone(), l.course_id.clone(), l.code.clone()))
+        .collect()
+}
+
+fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<(String, String, String)>, pass: u32) {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
@@ -310,7 +335,7 @@ fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<(String, String
                 }
             };
 
-            for (lesson_id, course_id) in lessons {
+            for (lesson_id, course_id, code) in lessons {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
@@ -319,7 +344,7 @@ fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<(String, String
                     tx: tx.clone(),
                     stop: stop.clone(),
                 };
-                match speakdrill_core::run_lesson(&cdp, &cfg, &player, &lesson_id, &course_id, &RunOptions::default(), &mut p).await
+                match speakdrill_core::run_lesson(&cdp, &cfg, &player, &lesson_id, &course_id, &code, &RunOptions::default(), &mut p).await
                 {
                     Ok(r) => {
                         let _ = save_report(&r);
@@ -437,6 +462,35 @@ impl eframe::App for App {
                         0.0
                     };
                     self.status = format!("完成：{} 句，平均 {:.1}", self.done, avg);
+                    // 追加課本：本批結束後自動接著跑（按停止則不自動開始，可按「▶ 跑佇列」手動開始）
+                    if self.stop.load(Ordering::Relaxed) {
+                        if !self.queue.is_empty() {
+                            push_log(
+                                self,
+                                format!(
+                                    "（停止中：追加的 {} 本課本不會自動開始，按「▶ 跑佇列」可開始）",
+                                    self.queue.len()
+                                ),
+                            );
+                        }
+                    } else if !self.queue.is_empty() {
+                        let selected = std::mem::take(&mut self.queue);
+                        let (picked, skipped) = expand_coursebooks(self, &selected);
+                        if skipped > 0 {
+                            push_log(self, format!("略過已完成 {} 課", skipped));
+                        }
+                        if picked.is_empty() {
+                            push_log(self, "（追加的課本都已完成）".into());
+                        } else {
+                            push_log(
+                                self,
+                                format!("接續跑追加：{} 課（{} 本課本）", picked.len(), selected.len()),
+                            );
+                            self.status = format!("接續追加執行中（{} 課）", picked.len());
+                            self.running = true;
+                            start_run(self.tx.clone(), self.stop.clone(), to_triples(&picked), self.pass);
+                        }
+                    }
                 }
                 Ev::SetupDone => {
                     self.setup_busy = false;
@@ -451,26 +505,13 @@ impl eframe::App for App {
         }
 
         // 把選中的課本（或佇列中的課本）展開成 lessons；已完成的課自動略過
-        let expand = |app: &App, queued: bool| -> (Vec<(String, String)>, usize) {
+        let expand = |app: &App, queued: bool| -> (Vec<LessonRef>, usize) {
             let selected: Vec<usize> = if queued {
                 app.queue.clone()
             } else {
                 vec![app.sel]
             };
-            let mut picked = Vec::new();
-            let mut skipped = 0usize;
-            for &idx in &selected {
-                if let Some((_, _, lessons)) = app.coursebooks.get(idx) {
-                    for l in lessons {
-                        if app.completed.contains(&l.lesson_id) {
-                            skipped += 1;
-                        } else {
-                            picked.push((l.lesson_id.clone(), l.course_id.clone()));
-                        }
-                    }
-                }
-            }
-            (picked, skipped)
+            expand_coursebooks(app, &selected)
         };
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
@@ -487,7 +528,7 @@ impl eframe::App for App {
                         push_log(self, "（選取的課本都已完成；要全部重跑按「▶▶ 跑全部」）".into());
                     } else {
                         self.running = true;
-                        start_run(self.tx.clone(), self.stop.clone(), picked, self.pass);
+                        start_run(self.tx.clone(), self.stop.clone(), to_triples(&picked), self.pass);
                     }
                 }
                 let qn = self.queue.len();
@@ -503,7 +544,8 @@ impl eframe::App for App {
                         push_log(self, "（佇列中的課本都已完成；要全部重跑按「▶▶ 跑全部」）".into());
                     } else {
                         self.running = true;
-                        start_run(self.tx.clone(), self.stop.clone(), picked, self.pass);
+                        self.queue.clear();
+                        start_run(self.tx.clone(), self.stop.clone(), to_triples(&picked), self.pass);
                     }
                 }
                 if ui.add_enabled(qn > 0, egui::Button::new("✖ 清佇列")).clicked() {
@@ -515,11 +557,7 @@ impl eframe::App for App {
                     .clicked()
                 {
                     self.running = true;
-                    let picked: Vec<(String, String)> = self
-                        .lessons
-                        .iter()
-                        .map(|l| (l.lesson_id.clone(), l.course_id.clone()))
-                        .collect();
+                    let picked = to_triples(&self.lessons);
                     start_run(self.tx.clone(), self.stop.clone(), picked, self.pass);
                 }
                 if ui.add_enabled(self.running, egui::Button::new("■ 停止")).clicked() {
@@ -554,7 +592,12 @@ impl eframe::App for App {
             .resizable(true)
             .default_width(360.0)
             .show(ctx, |ui| {
-                ui.label(format!("課本（已勾 {}）— 勾選加入佇列", self.queue.len()));
+                let qlabel = if self.running {
+            format!("課本（追加 {} 本·本批結束後接著跑）", self.queue.len())
+        } else {
+            format!("課本（已勾 {}）— 勾選加入佇列", self.queue.len())
+        };
+        ui.label(qlabel);
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for (i, (code, name, lessons)) in self.coursebooks.iter().enumerate() {
                         let total = lessons.len();

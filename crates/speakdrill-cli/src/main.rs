@@ -529,9 +529,24 @@ async fn cmd_run(lesson: String, course: String, resume: bool, pass: u32) -> Res
     let mut cfg = Config::load_or_default();
     cfg.pass_score = pass;
     let (cdp, player) = make_session(&cfg).await?;
+    // CodeName 必須與目錄一致，否則 MyET 頁面對不上課程。
+    // 先在使用者設定的 CodeName 裡找；找不到就掃所有目錄定位這一課屬於哪本。
+    let code = match speakdrill_core::lesson::fetch_catalog(&cdp, &cfg.server, &cfg.code, &cfg.content_type).await {
+        Ok(list) if list.iter().any(|l| l.lesson_id == lesson) => cfg.code.clone(),
+        _ => match speakdrill_core::lesson::fetch_all_catalogs(&cdp, &cfg.server, &cfg.content_type, false).await {
+            Ok(all) => all.iter().find(|l| l.lesson_id == lesson).map(|l| l.code.clone()).unwrap_or_else(|| {
+                println!("⚠ 在目錄中找不到 {lesson}，退回設定的 CodeName {}", cfg.code);
+                cfg.code.clone()
+            }),
+            Err(_) => cfg.code.clone(),
+        },
+    };
+    if code != cfg.code {
+        println!("使用課程所屬的 CodeName：{code}");
+    }
     let mut p = SilentProgress;
     let report = run_lesson(
-        &cdp, &cfg, &player, &lesson, &course,
+        &cdp, &cfg, &player, &lesson, &course, &code,
         &RunOptions { resume, ..Default::default() }, &mut p,
     ).await?;
     print_report(&report);
@@ -567,7 +582,7 @@ async fn cmd_batch(
         println!("\n=== [{}/{}] {} ===", begin + i + 1, all.len(), l.label());
         let mut p = SilentProgress;
         match run_lesson(
-            &cdp, &cfg, &player, &l.lesson_id, &l.course_id,
+            &cdp, &cfg, &player, &l.lesson_id, &l.course_id, &l.code,
             &RunOptions { resume, ..Default::default() }, &mut p,
         ).await {
             Ok(r) => { print_report(&r); ok += 1; }
@@ -618,7 +633,7 @@ async fn cmd_all(
         println!("\n=== [{}/{}] {} ===", begin + i + 1, all.len(), l.label());
         let mut p = SilentProgress;
         match run_lesson(
-            &cdp, &cfg, &player, &l.lesson_id, &l.course_id,
+            &cdp, &cfg, &player, &l.lesson_id, &l.course_id, &l.code,
             &RunOptions { resume, ..Default::default() }, &mut p,
         ).await {
             Ok(r) => { print_report(&r); ok += 1; }

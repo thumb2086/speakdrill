@@ -16,6 +16,9 @@ pub struct LessonRef {
     /// 已有成績（代表練過）→ 最佳分數
     #[serde(default)]
     pub best_score: Option<f64>,
+    /// 抓取此課程時使用的 CodeName（跑課網址必須帶同一個，否則 MyET 顯示/記錄到別套課）
+    #[serde(default)]
+    pub code: String,
 }
 
 impl LessonRef {
@@ -71,13 +74,14 @@ pub async fn fetch_catalog_opts(
             if let Ok(c) = serde_json::from_str::<CatalogCache>(&s) {
                 let age = c.fetched_at.elapsed_secs();
                 if age < 600 && !c.lessons.is_empty() {
-                    return Ok(c.lessons);
+                    return Ok(with_code(c.lessons, code));
                 }
             }
         }
     }
 
-    let lessons = fetch_catalog_live(cdp, server, code, content_type).await?;
+    let mut lessons = fetch_catalog_live(cdp, server, code, content_type).await?;
+    with_code_mut(&mut lessons, code);
 
     if let Ok(s) = serde_json::to_string(&CatalogCache {
         fetched_at: CacheStamp::now(),
@@ -88,6 +92,18 @@ pub async fn fetch_catalog_opts(
     }
 
     Ok(lessons)
+}
+
+/// 讓每個課程帶上抓取時使用的 CodeName；同一課跨 CodeName 會重複，以 fetch 順序先到先得（在 fetch_all_catalogs 去重）
+fn with_code(mut lessons: Vec<LessonRef>, code: &str) -> Vec<LessonRef> {
+    with_code_mut(&mut lessons, code);
+    lessons
+}
+
+fn with_code_mut(lessons: &mut Vec<LessonRef>, code: &str) {
+    for l in lessons {
+        l.code = code.to_string();
+    }
 }
 
 /// 取得所有課程（跨所有已知 CodeName）
@@ -204,6 +220,7 @@ async fn fetch_catalog_live(cdp: &Cdp, _server: &str, code: &str, content_type: 
                         course_id: r.cid,
                         title: unescape(&r.title),
                         best_score: r.score,
+                        code: code.to_string(),
                     })
                     .collect());
             }

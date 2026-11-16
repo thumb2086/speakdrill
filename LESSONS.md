@@ -140,3 +140,20 @@ v0.2.14 的事故就是在第 3 步缺席的情況下發布的。**不准跳過�
 | 5 | 依賴 App 畫面文字的判斷：寬鬆匹配 + 多候選按鈕 + 除錯輸出 |
 | 6 | 除錯順序：doctor → DEBUG run → 依 [cd]/▶/✗ 定位層次 → 修 → 重跑驗收 |
 | 7 | commit message 暫存檔寫到 `.thumb-work\`，`git add` 用明確路徑不用 `-A` |
+
+---
+
+## 9. 跑課網址的 CodeName 必須與目錄一致（v0.2.29）
+
+**症狀**：TUI 選了 BKM-B2B，MyET 頁面卻顯示「2A/Unit 5.1」，第一句 2 分。
+
+**根因**：`pipeline::run_lesson` 不分課程，一律把 `cfg.code`（設定檔的 BKM_2A）帶進 `ScoringPage.aspx` 的 `CodeName=`。
+課程屬於 B2B，頁面開的是 2A → 內容對不上。
+
+**修正（v0.2.29）**：目錄抓課程時就把當時用的 CodeName 存進 `LessonRef.code`，跑課網址用這個。
+舊快取沒有 `code` 欄位 → `#[serde(default)]` + 讀取時以目前 CodeName 覆寫，相容。
+`speakdrill run --lesson X`（無 `--code` 參數）也改為先在設定的 CodeName 找，找不到就掃所有目錄定位。
+
+**教訓**：
+1. 任何「全域設定」被用於「每個項目各自不同」的資料，一定會錯 — 要把來源存到項目上（`LessonRef.code`）。
+2. 選單做對不代表跑進去也對；要沿著資料鏈一路檢查到「實際發出的 HTTP 請求」。
