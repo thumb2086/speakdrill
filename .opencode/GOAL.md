@@ -107,6 +107,13 @@
     v0.2.30 CI (43791366991) ✓；使用者即時 --refresh 修復快取（1A/1B/2A 共 114 課有積分找回）
   - v0.2.31：CLI help/doctor/run 指引同步到自動綁定時代（Init/Doctor 說明、doctor/run 綁定失敗時指引 speakdrill setup 取代指路 ms-settings）
   - v0.2.32：文件全面同步（README「輸出」改寫 — 官方目錄成績、官方累計時數；npm README「使用時你會看到」；LESSONS #10 readyState≠資料填完）；CI (43791980980) ✓
-  - v0.2.33：init [4/6] 通用化 — 不再只拉 VoiceMeeter B1，依 routes() 找 mic_device 把錄音端（CABLE Output／B1）拉到 100%；結尾加下一步引導；實測在使用者機器上 [4/6] 顯示錄音端 100% ✓、[6/6] registry 已綁定直接結束（不開視窗）；CI (43792265325) ✅（發布中，npm latest 尚未包含）
+  - v0.2.33：init [4/6] 通用化 — 不再只拉 VoiceMeeter B1，依 routes() 找 mic_device 把錄音端（CABLE Output／B1）拉到 100%；結尾加下一步引導；實測在使用者機器上 [4/6] 顯示錄音端 100% ✓、[6/6] registry 已綁定直接結束（不開視窗）；CI (43792265325) ✅（npm latest=0.2.33）
+- [2026-11-16] checkpoint14：v0.2.34（說明文件全面重寫）+ v0.2.35（課本內容預覽 + CI 快取）發布 ✅
+  - v0.2.34：README 新增「新手上路（10 分鐘）」＋「常見問題（FAQ）」＋「疑難排解」；報告 JSON 範例；npm README「文件」指向新區塊；
+    順帶修正過期 wording（README init 文案「設 VoiceMeeter 路由」、CLI --about / Init doc、npm README）；CI (43792872777)
+  - v0.2.35：TUI 按 i 顯示選中課本課程列表（單元名＋課號＋✓/○）；GUI「📋 課本內容」按鈕對等；
+    執行中日誌改顯示「▶ 單元名（課號）」；CI rust-cache 改 shared-key: speakdrill-release（Cargo.lock 隨版本變 → 每次全量重編 → 修正後增量快取）
+  - 使用者回報「還是選的跟跑得不一樣」：查證實際 reports — 2B018~2B028 全部平均 86~90 ✓ CodeName 修正生效；
+    只有 BKM-GAR-2B029 0 分（38 秒，title 空，極可能 MyET 被關/太早導航，可重跑）；user 困惑源於 GAR 課號不易辨識 → 以 i/📋 預覽解決
 - Status: completed
-- Updated: 2026-11-16T10:45:00+08:00
+- Updated: 2026-11-16T11:30:00+08:00
