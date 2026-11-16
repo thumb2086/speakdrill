@@ -176,7 +176,7 @@ impl Default for RunOptions {
 }
 
 /// 跑一課
-/// `code`：抓取此課程時使用的 CodeName（必須與目錄一致，否則 MyET 頁面對不上課程）
+/// `code`／`content_type`：抓取此課程時使用的 CodeName／ContentType（必須與目錄一致，否則 MyET 頁面對不上課程）
 pub async fn run_lesson(
     cdp: &Cdp,
     cfg: &Config,
@@ -184,12 +184,13 @@ pub async fn run_lesson(
     lesson_id: &str,
     course_id: &str,
     code: &str,
+    content_type: &str,
     opts: &RunOptions,
     p: &mut dyn Progress,
 ) -> Result<LessonReport> {
     check_app_binding(cfg, opts.force, p)?;
     let started = Instant::now();
-    let query = scoring_query(lesson_id, code, &cfg.content_type, cfg.mode, course_id);
+    let query = scoring_query(lesson_id, code, content_type, cfg.mode, course_id);
     let lines = fetch_lines(cdp, &query).await?;
     p.log(&format!("課程 {lesson_id}：{} 句", lines.len()));
 

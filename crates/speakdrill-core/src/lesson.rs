@@ -19,6 +19,9 @@ pub struct LessonRef {
     /// 抓取此課程時使用的 CodeName（跑課網址必須帶同一個，否則 MyET 顯示/記錄到別套課）
     #[serde(default)]
     pub code: String,
+    /// 抓取此課程時使用的 ContentType（ETS／GUIDE／GEN 等，跑課網址也要帶同一個）
+    #[serde(default)]
+    pub contype: String,
 }
 
 impl LessonRef {
@@ -74,7 +77,7 @@ pub async fn fetch_catalog_opts(
             if let Ok(c) = serde_json::from_str::<CatalogCache>(&s) {
                 let age = c.fetched_at.elapsed_secs();
                 if age < 600 && !c.lessons.is_empty() {
-                    return Ok(with_code(c.lessons, code));
+                    return Ok(with_code(c.lessons, code, content_type));
                 }
             }
         }
@@ -94,12 +97,12 @@ pub async fn fetch_catalog_opts(
                     eprintln!(
                         "⚠ 本次抓到 0 個有成績的課程，保留舊快取（{old_scored} 個有成績）"
                     );
-                    return Ok(with_code(old.lessons, code));
+                    return Ok(with_code(old.lessons, code, content_type));
                 }
             }
         }
     }
-    with_code_mut(&mut lessons, code);
+    with_code_mut(&mut lessons, code, content_type);
 
     if let Ok(s) = serde_json::to_string(&CatalogCache {
         fetched_at: CacheStamp::now(),
@@ -112,19 +115,55 @@ pub async fn fetch_catalog_opts(
     Ok(lessons)
 }
 
-/// 讓每個課程帶上抓取時使用的 CodeName；同一課跨 CodeName 會重複，以 fetch 順序先到先得（在 fetch_all_catalogs 去重）
-fn with_code(mut lessons: Vec<LessonRef>, code: &str) -> Vec<LessonRef> {
-    with_code_mut(&mut lessons, code);
+/// 讓每個課程帶上抓取時使用的 CodeName + ContentType；同一課跨 CodeName 會重複，以 fetch 順序先到先得（在 fetch_all_catalogs 去重）
+fn with_code(mut lessons: Vec<LessonRef>, code: &str, contype: &str) -> Vec<LessonRef> {
+    with_code_mut(&mut lessons, code, contype);
     lessons
 }
 
-fn with_code_mut(lessons: &mut Vec<LessonRef>, code: &str) {
+fn with_code_mut(lessons: &mut Vec<LessonRef>, code: &str, contype: &str) {
     for l in lessons {
         l.code = code.to_string();
+        l.contype = contype.to_string();
     }
 }
 
-/// 取得所有課程（跨所有已知 CodeName）
+/// 從 MyET「我的課程」端點抓出這個帳號實際擁有的課本清單（含每本的 ContentType）
+/// `PersonalizedPageServices.aspx?op=MyContent` → document.write(...) 的 JS 字串 → 解析 tile 屬性
+pub async fn fetch_enrolled_books(cdp: &Cdp) -> Result<Vec<(String, String, String)>> {
+    let js = r#"(async () => {
+        try {
+            const r = await fetch('/AudreyWeb/PersonalizedPageServices.aspx?op=MyContent&UID=', { credentials: 'include' });
+            const raw = await r.text();
+            const text = raw.replace(/\\"/g, '"').replace(/&amp;/g, '&').replace(/&#xA;/g, '\n');
+            const out = [];
+            const chunks = text.split('data-codename="');
+            for (let i = 1; i < chunks.length; i++) {
+                const b = chunks[i];
+                const cm = /^([A-Za-z0-9_-]+)"/.exec(b);
+                const ctm = /data-contype="([^"]+)"/.exec(b);
+                const nm = /title_ellipsis">([^<]+)</.exec(b);
+                if (cm && ctm) out.push({ code: cm[1], contype: ctm[1], name: nm ? nm[1].trim() : cm[1] });
+            }
+            return JSON.stringify(out);
+        } catch (e) { return '[]'; }
+    })()"#;
+    let raw = cdp.eval_string(js).await?;
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&raw)?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            (
+                r["code"].as_str().unwrap_or("").to_string(),
+                r["contype"].as_str().unwrap_or("").to_string(),
+                r["name"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .filter(|(c, _, _)| !c.is_empty())
+        .collect())
+}
+
+/// 取得所有課程（跨所有 enrolled 課本，含每本的 ContentType）
 pub async fn fetch_all_catalogs(
     cdp: &Cdp,
     server: &str,
@@ -133,12 +172,24 @@ pub async fn fetch_all_catalogs(
 ) -> Result<Vec<LessonRef>> {
     use crate::config::KNOWN_CODENAMES;
     let mut all_lessons = Vec::new();
-    
-    for (code, name) in KNOWN_CODENAMES {
-        match fetch_catalog_opts(cdp, server, code, content_type, refresh).await {
+
+    // 優先用「我的課程」端點列出的實際課本（含 ETS／GUIDE／GEN 自身類型），
+    // 抓不到（可能沒登入）才退回內建清單
+    let enrolled = fetch_enrolled_books(cdp).await.unwrap_or_default();
+    let books: Vec<(String, String, String)> = if enrolled.is_empty() {
+        KNOWN_CODENAMES
+            .iter()
+            .map(|(c, n)| (c.to_string(), content_type.to_string(), n.to_string()))
+            .collect()
+    } else {
+        enrolled
+    };
+
+    for (code, contype, name) in &books {
+        match fetch_catalog_opts(cdp, server, code, contype, refresh).await {
             Ok(mut lessons) => {
                 if !lessons.is_empty() {
-                    // 為每個課程加上 CodeName 標記
+                    // 為每個課程加上課本標記
                     for lesson in &mut lessons {
                         lesson.title = format!("{}  [{}]", lesson.title, name);
                     }
@@ -239,6 +290,7 @@ async fn fetch_catalog_live(cdp: &Cdp, _server: &str, code: &str, content_type: 
                         title: unescape(&r.title),
                         best_score: r.score,
                         code: code.to_string(),
+                        contype: content_type.to_string(),
                     })
                     .collect());
             }

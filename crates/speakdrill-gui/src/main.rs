@@ -17,6 +17,8 @@ enum Ev {
     MyetStats(speakdrill_core::MyetStats),
     /// MyET 官方累計時數讀取失敗（才退回顯示本機值）
     MyetStatsFailed,
+    /// 課本清單 (code, 顯示名稱)；用於課本分組的顯示名
+    Books(Vec<(String, String)>),
     Log(String),
     Line(speakdrill_core::LineScore),
     LessonDone(LessonReport),
@@ -73,6 +75,8 @@ struct App {
     myet_certs: Option<u64>,
     /// MyET 官方時數讀取失敗（顯示本機值）
     myet_stats_failed: bool,
+    /// 課本清單：(CodeName, 顯示名稱)，用於課本分組顯示名
+    books_names: std::collections::HashMap<String, String>,
     pass: u32,
     setup_busy: bool,
 }
@@ -109,6 +113,7 @@ impl App {
             myet_level: None,
             myet_certs: None,
             myet_stats_failed: false,
+            books_names: std::collections::HashMap::new(),
             pass: 80,
             setup_busy: false,
         };
@@ -190,26 +195,42 @@ fn load_catalog(tx: Sender<Ev>, refresh: bool) {
             };
             let _ = tx.send(Ev::Log(format!("CDP 已連線 ({})，載入目錄…", cfg.cdp_port)));
 
+            // 從「我的課程」端點拿實際課本清單（含每本的 ContentType）
+            let enrolled = speakdrill_core::lesson::fetch_enrolled_books(&cdp).await.unwrap_or_default();
+            let books: Vec<(String, String, String)> = if enrolled.is_empty() {
+                speakdrill_core::config::KNOWN_CODENAMES
+                    .iter()
+                    .map(|(c, n)| (c.to_string(), cfg.content_type.clone(), n.to_string()))
+                    .collect()
+            } else {
+                let _ = tx.send(Ev::Log(format!("找到 {} 本課本", enrolled.len())));
+                enrolled
+            };
+            let _ = tx.send(Ev::Books(books.iter().map(|(c, _, n)| (c.clone(), n.clone())).collect()));
             // 先載入 config 指定的預設課本（快），其餘背景逐本 append
             let default_code = cfg.code.clone();
-            match speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, &default_code, &cfg.content_type, refresh).await {
-                Ok(l) if !l.is_empty() => {
-                    let _ = tx.send(Ev::Log(format!("目錄載入：{} 課", l.len())));
-                    let _ = tx.send(Ev::Catalog(l));
+            if let Some((dcode, dtype, _dname)) = books.iter().find(|(c, _, _)| *c == default_code).cloned() {
+                match speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, &dcode, &dtype, refresh).await {
+                    Ok(l) if !l.is_empty() => {
+                        let _ = tx.send(Ev::Log(format!("目錄載入：{} 課", l.len())));
+                        let _ = tx.send(Ev::Catalog(l));
+                    }
+                    Ok(_) => {
+                        let _ = tx.send(Ev::Log(format!("預設課本 {} 目錄是空的", dcode)));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Ev::Fatal(format!("抓目錄失敗：{e}")));
+                        return;
+                    }
                 }
-                Ok(_) => {
-                    let _ = tx.send(Ev::Log(format!("預設課本 {default_code} 目錄是空的")));
-                }
-                Err(e) => {
-                    let _ = tx.send(Ev::Fatal(format!("抓目錄失敗：{e}")));
-                    return;
-                }
+            } else {
+                let _ = tx.send(Ev::Log(format!("（找不到預設 CodeName {default_code}，直接背景載入全部）")));
             }
-            for (code, name) in speakdrill_core::config::KNOWN_CODENAMES.iter() {
-                if *code == default_code {
+            for (code, contype, name) in books {
+                if code == default_code {
                     continue;
                 }
-                match speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, code, &cfg.content_type, refresh).await {
+                match speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, &code, &contype, refresh).await {
                     Ok(l) if !l.is_empty() => {
                         let n = l.len();
                         let _ = tx.send(Ev::CatalogAppend(l));
@@ -311,14 +332,7 @@ fn lesson_label(id: &str, title: &str) -> String {
     }
 }
 
-/// LessonRef 列表 → (lesson_id, course_id, code, title) 四元組（start_run 用）
-fn to_quads(v: &[LessonRef]) -> Vec<(String, String, String, String)> {
-    v.iter()
-        .map(|l| (l.lesson_id.clone(), l.course_id.clone(), l.code.clone(), l.title.clone()))
-        .collect()
-}
-
-fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<(String, String, String, String)>, pass: u32) {
+fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<LessonRef>, pass: u32) {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
@@ -345,16 +359,20 @@ fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<(String, String
                 }
             };
 
-            for (lesson_id, course_id, code, title) in lessons {
+            for l in lessons {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
-                let _ = tx.send(Ev::Log(format!("▶ {}", lesson_label(&lesson_id, &title))));
+                let lesson_id = l.lesson_id.clone();
+                let course_id = l.course_id.clone();
+                let code = l.code.clone();
+                let contype = l.contype.clone();
+                let _ = tx.send(Ev::Log(format!("▶ {}", lesson_label(&lesson_id, &l.title))));
                 let mut p = ChannelProgress {
                     tx: tx.clone(),
                     stop: stop.clone(),
                 };
-                match speakdrill_core::run_lesson(&cdp, &cfg, &player, &lesson_id, &course_id, &code, &RunOptions::default(), &mut p).await
+                match speakdrill_core::run_lesson(&cdp, &cfg, &player, &lesson_id, &course_id, &code, &contype, &RunOptions::default(), &mut p).await
                 {
                     Ok(r) => {
                         let _ = save_report(&r);
@@ -371,7 +389,12 @@ fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<(String, String
 }
 
 /// 把單一 lesson 標記完成並歸組進 coursebooks
-fn group_lesson(coursebooks: &mut Vec<Coursebook>, completed: &mut HashSet<String>, l: &LessonRef) {
+fn group_lesson(
+    coursebooks: &mut Vec<Coursebook>,
+    completed: &mut HashSet<String>,
+    books_names: &std::collections::HashMap<String, String>,
+    l: &LessonRef,
+) {
     if l.best_score.is_some() {
         completed.insert(l.lesson_id.clone());
     }
@@ -382,11 +405,7 @@ fn group_lesson(coursebooks: &mut Vec<Coursebook>, completed: &mut HashSet<Strin
     } else {
         l.course_id.clone()
     };
-    let cb_name = speakdrill_core::config::KNOWN_CODENAMES
-        .iter()
-        .find(|(code, _)| code.replace('_', "-B") == cb_key)
-        .map(|(_, name)| name.to_string())
-        .unwrap_or_else(|| cb_key.clone());
+    let cb_name = books_names.get(&l.code).cloned().unwrap_or_else(|| cb_key.clone());
     if let Some(cb) = coursebooks.iter_mut().find(|(c, _, _)| c == &cb_key) {
         if !cb.2.iter().any(|x| x.lesson_id == l.lesson_id) {
             cb.2.push(l.clone());
@@ -402,14 +421,14 @@ fn merge_catalog(app: &mut App, list: Vec<LessonRef>, replace: bool) {
         app.coursebooks.clear();
         app.lessons = list;
         for l in &app.lessons {
-            group_lesson(&mut app.coursebooks, &mut app.completed, l);
+            group_lesson(&mut app.coursebooks, &mut app.completed, &app.books_names, l);
         }
     } else {
         for l in &list {
             if !app.lessons.iter().any(|x| x.lesson_id == l.lesson_id) {
                 app.lessons.push(l.clone());
             }
-            group_lesson(&mut app.coursebooks, &mut app.completed, l);
+            group_lesson(&mut app.coursebooks, &mut app.completed, &app.books_names, l);
         }
     }
     // 佇列保留索引，超出範圍的夾掉
@@ -439,6 +458,9 @@ impl eframe::App for App {
                 }
                 Ev::MyetStatsFailed => {
                     self.myet_stats_failed = true;
+                }
+                Ev::Books(list) => {
+                    self.books_names = list.into_iter().collect();
                 }
                 Ev::Log(s) => push_log(self, s),
                 Ev::Line(s) => {
@@ -498,7 +520,7 @@ impl eframe::App for App {
                             );
                             self.status = format!("接續追加執行中（{} 課）", picked.len());
                             self.running = true;
-                            start_run(self.tx.clone(), self.stop.clone(), to_quads(&picked), self.pass);
+                            start_run(self.tx.clone(), self.stop.clone(), picked.clone(), self.pass);
                         }
                     }
                 }
@@ -557,7 +579,7 @@ impl eframe::App for App {
                         push_log(self, "（選取的課本都已完成；要全部重跑按「▶▶ 跑全部」）".into());
                     } else {
                         self.running = true;
-                        start_run(self.tx.clone(), self.stop.clone(), to_quads(&picked), self.pass);
+                        start_run(self.tx.clone(), self.stop.clone(), picked.clone(), self.pass);
                     }
                 }
                 let qn = self.queue.len();
@@ -574,7 +596,7 @@ impl eframe::App for App {
                     } else {
                         self.running = true;
                         self.queue.clear();
-                        start_run(self.tx.clone(), self.stop.clone(), to_quads(&picked), self.pass);
+                        start_run(self.tx.clone(), self.stop.clone(), picked.clone(), self.pass);
                     }
                 }
                 if ui.add_enabled(qn > 0, egui::Button::new("✖ 清佇列")).clicked() {
@@ -586,7 +608,7 @@ impl eframe::App for App {
                     .clicked()
                 {
                     self.running = true;
-                    let picked = to_quads(&self.lessons);
+                    let picked = self.lessons.clone();
                     start_run(self.tx.clone(), self.stop.clone(), picked, self.pass);
                 }
                 if ui.add_enabled(self.running, egui::Button::new("■ 停止")).clicked() {

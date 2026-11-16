@@ -36,6 +36,8 @@ pub enum Ev {
     MyetStats(speakdrill_core::MyetStats),
     /// MyET 官方累計時數讀取失敗（才退回顯示本機值）
     MyetStatsFailed,
+    /// 課本清單 (code, 顯示名稱)；用於課本分組的顯示名
+    Books(Vec<(String, String)>),
     Log(String),
     Score(LineScore),
     LessonStart(String),
@@ -151,10 +153,10 @@ fn build_status(app: &App) -> String {
 
 /// 互動式 App 狀態
 struct App {
-    /// 所有課程（lesson_id, course_id）
-    lessons: Vec<(String, String, String, String)>,
-    /// 課本清單：(CodeName, 顯示名稱, [(lesson_id, course_id, code, title)])
-    coursebooks: Vec<(String, String, Vec<(String, String, String, String)>)>,
+    /// 所有課程
+    lessons: Vec<LessonRef>,
+    /// 課本清單：(cb_key, 顯示名稱, [LessonRef])
+    coursebooks: Vec<(String, String, Vec<LessonRef>)>,
     /// 佇列：課本索引（Vec 保留勾選順序）
     queue: Vec<usize>,
     /// 已完成的課程 ID
@@ -173,6 +175,8 @@ struct App {
     myet_certs: Option<u64>,
     /// MyET 官方時數讀取失敗（顯示本機值）
     myet_stats_failed: bool,
+    /// 課本清單：(CodeName, 顯示名稱)，用於課本分組顯示名
+    books_names: std::collections::HashMap<String, String>,
     status: String,
     /// 紀錄面板：從最新往回捲的行數（0 = 跟隨最新輸出）
     log_scroll: usize,
@@ -200,6 +204,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         myet_level: None,
         myet_certs: None,
         myet_stats_failed: false,
+        books_names: std::collections::HashMap::new(),
         status: "載入目錄中…".into(),
         log_scroll: 0,
         log_page: 10,
@@ -423,9 +428,9 @@ fn event_loop(
                             let mut lines = Vec::new();
                             if let Some((code, name, lessons)) = app.coursebooks.get(app.sel) {
                                 lines.push(format!("── {} {} 課程列表（{}）──", code, name, lessons.len()));
-                                for (lid, _, _, title) in lessons {
-                                    let mark = if app.completed.contains(lid) { "✓" } else { " " };
-                                    lines.push(format!("  {mark} {}", lesson_label(lid, title)));
+                                for l in lessons {
+                                    let mark = if app.completed.contains(&l.lesson_id) { "✓" } else { " " };
+                                    lines.push(format!("  {mark} {}", lesson_label(&l.lesson_id, &l.title)));
                                 }
                                 lines.push("── Enter 開始 ──".to_string());
                             }
@@ -448,7 +453,7 @@ fn start_batch(
     rt: &tokio::runtime::Runtime,
     tx: UnboundedSender<Ev>,
     stop: Arc<AtomicBool>,
-    lessons: Vec<(String, String, String, String)>,
+    lessons: Vec<LessonRef>,
 ) {
     // 清除先前中止請求，讓停止按鈕可重複使用
     stop.store(false, Ordering::Relaxed);
@@ -487,19 +492,19 @@ fn start_batch(
             }
         }
 
-        for (lesson, course, code, title) in lessons {
+        for l in lessons {
             if stop.load(Ordering::Relaxed) {
                 break;
             }
-            let _ = tx.send(Ev::LessonStart(lesson_label(&lesson, &title)));
+            let _ = tx.send(Ev::LessonStart(lesson_label(&l.lesson_id, &l.title)));
             let mut p = ChannelProgress { tx: tx.clone(), stop: stop.clone() };
-            match run_lesson(&cdp, &cfg, &player, &lesson, &course, &code, &RunOptions::default(), &mut p).await {
+            match run_lesson(&cdp, &cfg, &player, &l.lesson_id, &l.course_id, &l.code, &l.contype, &RunOptions::default(), &mut p).await {
                 Ok(r) => {
                     let _ = save_report(&r);
                     let _ = tx.send(Ev::LessonDone(r));
                 }
                 Err(e) => {
-                    let _ = tx.send(Ev::Log(format!("✗ {lesson}：{e}")));
+                    let _ = tx.send(Ev::Log(format!("✗ {}：{e}", l.lesson_id)));
                 }
             }
         }
@@ -517,17 +522,17 @@ fn lesson_label(id: &str, title: &str) -> String {
 }
 
 /// 把選中的課本索引展開為待跑課程列表（保留勾選順序，略過已完成）
-/// 回傳：(待跑課程 (lesson_id, course_id, code, title), 略過數)
-fn expand_picked(app: &App, selected: &[usize]) -> (Vec<(String, String, String, String)>, usize) {
+/// 回傳：(待跑課程，略過數)
+fn expand_picked(app: &App, selected: &[usize]) -> (Vec<LessonRef>, usize) {
     let mut picked = Vec::new();
     let mut skipped = 0usize;
     for &idx in selected {
         if let Some((_, _, lessons)) = app.coursebooks.get(idx) {
-            for (lid, cid, code, title) in lessons {
-                if app.completed.contains(lid) {
+            for l in lessons {
+                if app.completed.contains(&l.lesson_id) {
                     skipped += 1;
                 } else {
-                    picked.push((lid.clone(), cid.clone(), code.clone(), title.clone()));
+                    picked.push(l.clone());
                 }
             }
         }
@@ -540,18 +545,15 @@ fn merge_catalog(app: &mut App, list: Vec<LessonRef>, replace: bool) {
     if replace {
         push_log(app, format!("目錄載入：{} 課", list.len()));
         app.coursebooks.clear();
-        app.lessons = list
-            .iter()
-            .map(|l| (l.lesson_id.clone(), l.course_id.clone(), l.code.clone(), l.title.clone()))
-            .collect();
+        app.lessons = list.clone();
     }
     for l in &list {
         if l.best_score.is_some() {
             app.completed.insert(l.lesson_id.clone());
         }
         if !replace {
-            if !app.lessons.iter().any(|(id, _, _, _)| id == &l.lesson_id) {
-                app.lessons.push((l.lesson_id.clone(), l.course_id.clone(), l.code.clone(), l.title.clone()));
+            if !app.lessons.iter().any(|x| x.lesson_id == l.lesson_id) {
+                app.lessons.push(l.clone());
             }
         }
         // 按 course_id 前綴分組為課本（例：BKM-B2A-001 → BKM-B2A）
@@ -561,14 +563,14 @@ fn merge_catalog(app: &mut App, list: Vec<LessonRef>, replace: bool) {
         } else {
             l.course_id.clone()
         };
-        let cb_name = speakdrill_core::config::KNOWN_CODENAMES
-            .iter()
-            .find(|(code, _)| code.replace('_', "-B") == cb_key)
-            .map(|(_, name)| name.to_string())
+        let cb_name = app
+            .books_names
+            .get(&l.code)
+            .cloned()
             .unwrap_or_else(|| cb_key.clone());
-        let triple = || (l.lesson_id.clone(), l.course_id.clone(), l.code.clone(), l.title.clone());
+        let triple = || l.clone();
         if let Some(cb) = app.coursebooks.iter_mut().find(|(c, _, _)| c == &cb_key) {
-            if !cb.2.iter().any(|(id, _, _, _)| id == &l.lesson_id) {
+            if !cb.2.iter().any(|x| x.lesson_id == l.lesson_id) {
                 cb.2.push(triple());
             }
         } else {
@@ -592,6 +594,9 @@ fn apply(app: &mut App, ev: Ev) {
         }
         Ev::MyetStatsFailed => {
             app.myet_stats_failed = true;
+        }
+        Ev::Books(list) => {
+            app.books_names = list.into_iter().collect();
         }
         Ev::Log(s) => push_log(app, s),
         Ev::Score(s) => {
@@ -633,46 +638,50 @@ fn spawn_catalog(tx: UnboundedSender<Ev>, refresh: bool) {
         match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
             Ok(cdp) => {
                 let _ = tx.send(Ev::Log("spawn_catalog: CDP 已連線".into()));
+                // 從「我的課程」端點拿實際課本清單（含每本的 ContentType）；拿不到就退回內建清單
+                let enrolled = speakdrill_core::lesson::fetch_enrolled_books(&cdp).await.unwrap_or_default();
+                let books: Vec<(String, String, String)> = if enrolled.is_empty() {
+                    speakdrill_core::config::KNOWN_CODENAMES
+                        .iter()
+                        .map(|(c, n)| (c.to_string(), cfg.content_type.clone(), n.to_string()))
+                        .collect()
+                } else {
+                    let _ = tx.send(Ev::Log(format!("找到 {} 本課本", enrolled.len())));
+                    enrolled
+                };
+                let _ = tx.send(Ev::Books(books.iter().map(|(c, _, n)| (c.clone(), n.clone())).collect()));
                 // 先載入預設 CodeName（快速，約 1-2 秒）
                 let default_code = cfg.code.clone();
-                let default_name = speakdrill_core::config::KNOWN_CODENAMES
-                    .iter()
-                    .find(|(c, _)| *c == default_code)
-                    .map(|(_, n)| *n)
-                    .unwrap_or("預設");
-                match speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, &default_code, &cfg.content_type, refresh).await {
-                    Ok(mut lessons) => {
-                        let _ = tx.send(Ev::Log(format!("spawn_catalog: fetch_catalog_opts 回傳 {} 課", lessons.len())));
-                        if !lessons.is_empty() {
-                            for lesson in &mut lessons {
-                                lesson.title = format!("{}  [{}]", lesson.title, default_name);
+                let default_book = books.iter().find(|(c, _, _)| *c == default_code).cloned();
+                if let Some((dcode, dtype, _dname)) = &default_book {
+                    match speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, dcode, dtype, refresh).await {
+                        Ok(lessons) => {
+                            let _ = tx.send(Ev::Log(format!("spawn_catalog: fetch_catalog_opts 回傳 {} 課", lessons.len())));
+                            if !lessons.is_empty() {
+                                let _ = tx.send(Ev::Catalog(lessons));
                             }
-                            let _ = tx.send(Ev::Catalog(lessons));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(Ev::Fatal(format!("抓目錄失敗：{e}")));
+                            return;
                         }
                     }
-                    Err(e) => {
-                        let _ = tx.send(Ev::Fatal(format!("抓目錄失敗：{e}")));
-                        return;
-                    }
+                } else {
+                    let _ = tx.send(Ev::Log(format!("（找不到預設 CodeName {default_code}，直接背景載入全部）")));
                 }
-                // 背景載入其餘 CodeName，逐批 append
-                let other_codes: Vec<(&str, &str)> = speakdrill_core::config::KNOWN_CODENAMES
-                    .iter()
-                    .filter(|(c, _)| *c != default_code)
-                    .copied()
-                    .collect();
-                for (code, name) in other_codes {
-                    match speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, code, &cfg.content_type, refresh).await {
-                        Ok(mut lessons) => {
+                // 背景載入其餘課本，逐批 append
+                for (code, contype, _name) in &books {
+                    if *code == default_code {
+                        continue;
+                    }
+                    match speakdrill_core::lesson::fetch_catalog_opts(&cdp, &cfg.server, code, contype, refresh).await {
+                        Ok(lessons) => {
                             if !lessons.is_empty() {
-                                for lesson in &mut lessons {
-                                    lesson.title = format!("{}  [{}]", lesson.title, name);
-                                }
                                 let _ = tx.send(Ev::CatalogAppend(lessons));
                             }
                         }
                         Err(_) => {
-                            // 忽略無法存取的 CodeName
+                            // 忽略無法存取的課本
                         }
                     }
                 }
@@ -719,7 +728,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
         .enumerate()
         .map(|(i, (code, name, lessons))| {
             let total = lessons.len();
-            let done = lessons.iter().filter(|(id, _, _, _)| app.completed.contains(id)).count();
+            let done = lessons.iter().filter(|l| app.completed.contains(&l.lesson_id)).count();
             let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u32 } else { 0 };
             let mark = if app.queue.contains(&i) { "●" } else { " " };
             ListItem::new(TLine::from(format!("{} {}  {}  {}/{} ({:.0}%)", mark, code, name, done, total, pct)))
