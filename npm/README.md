@@ -28,6 +28,15 @@ speakdrill doctor
 
 安裝時會從 GitHub Releases 下載原生二進位（`speakdrill.exe` / `speakdrill-gui.exe`）。
 
+## 使用時你會看到
+
+- **完成率 / 本課本成績**：從 MyET 官方目錄抓取（含 best_score），不是本工具自算
+- **累計時數**：TUI / GUI 標題列顯示 MyET 官方累計（Dashboard「學習時間」）；讀取前顯示「累計 …」，讀取失敗才退回本機累計
+- **`speakdrill run --lesson <ID> --course <ID>`**：不用指定 CodeName，會自動從目錄定位課程所屬的那本
+- **跑到一半想加課本**：批次執行中按 `Space` 勾選，本批課程跑完會自動接續跑（TUI 標題顯示「追加 N 本」）；GUI 相同（執行中勾選即追加）
+- **目錄快取**：10 分鐘內的目錄直接從快取讀；抓到 0 個有成績時不會覆蓋舊快取
+
+
 
 ## 重開機需求
 

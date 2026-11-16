@@ -183,9 +183,10 @@ speakdrill                      # 終端機介面（預設；課程列表 + 即�
 speakdrill-gui                  # 原生 GUI
 
 speakdrill list                 # 列出目錄課程（名稱 + 代碼 + 已練分數）
-speakdrill list --refresh       # 忽略快取重抓（目錄快取 10 分鐘）
+speakdrill list --refresh       # 忽略快取重抓（目錄快取 10 分鐘；抓到的 0 個有成績時不會覆蓋舊快取）
 
 speakdrill run  --lesson BKM-GAR-1A027 --course BKM-B1A-001
+                                 # 不用加 --code：自動從目錄定位這一課所屬的 CodeName
 speakdrill batch --code BKM_1A --skip-completed   # 跳過已練過的課
 speakdrill batch --code BKM_1A --limit 5
 speakdrill batch --code BKM_1A --start 10 --limit 3
@@ -198,7 +199,10 @@ speakdrill reset --yes            # 連設定檔一起刪
 
 - 報告：`%APPDATA%\speakdrill\reports\<LessonID>.json`
 - TTS 快取：`%LOCALAPPDATA%\speakdrill\audio\<LessonID>\`
-- 累計練習時數（MyET 官方 Dashboard 的「學習時間」，啟動時由 TUI／GUI 讀取並顯示）
+- 課程完成率與成績：來自 MyET 官方目錄（`CategoryLessonScores.aspx`，含 best_score），不是本工具自己算的
+- 累計時數：標題列顯示 **MyET 官方累計**（Dashboard「學習時間」，每次啟動讀取）；
+  讀取完成前顯示「累計 …」，讀取失敗才退回本機累計（只算本工具跑的課次）
+- 取得 MyET 官方狀態需要課程 App 已登入；重開機後首次啟動時工具會自動等頁面載入完成再抓
 
 ---
 

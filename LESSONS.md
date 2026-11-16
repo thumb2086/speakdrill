@@ -157,3 +157,23 @@ v0.2.14 的事故就是在第 3 步缺席的情況下發布的。**不准跳過�
 **教訓**：
 1. 任何「全域設定」被用於「每個項目各自不同」的資料，一定會錯 — 要把來源存到項目上（`LessonRef.code`）。
 2. 選單做對不代表跑進去也對；要沿著資料鏈一路檢查到「實際發出的 HTTP 請求」。
+
+---
+
+## 10. `readyState=complete` ≠ 資料填完（v0.2.30 事故）
+
+**症狀**：MyET 重開後 TUI 顯示「MyET 官方累計 0.0 小時」，全部課本 0%。
+
+**根因**（兩個獨立的賽跑）：
+1. MyET 開機比 CDP port 早好，TUI 自動啟動後立刻抓目錄 → `CategoryLessonScores.aspx` 的 best_score 全是 null → 落回只有課名的 `CatalogPage.aspx` → **劣化結果被寫進快取蓋掉好資料** → 全部 0%。
+2. Dashboard.aspx 的官方值（學習時間/LV/證書）是 **JS 非同步填進去的**，HTML 先畫 placeholder（時間 `0.0 分`、證書/LV 空），readyState=complete 就讀會直接吃到 placeholder。
+
+**修正**：
+- 目錄抓取前先等 `readyState==complete 且 URL 含 AudreyWeb`（最多 30 秒）。
+- 官方統計改直接讀元素 id（`lblLearnTimeValue`/`Unit`、`divCertificateValue`、`lblExpValue`），輪詢到「證書與 LV 皆非空」才採用；讀不到才退回 innerText regex。
+- 目錄快取保護：refresh=false 且「新抓 0 個有成績、舊快取 ≥1 個」→ 保留舊快取不覆蓋。
+
+**教訓**：
+1. 凡是「App 畫面上的數字」，先問一句：**這是 SSR 內容還是 JS 填的？** 填的是 → 直接讀元素 id + 輪詢非空，別讀 innerText。
+2. 任何會**毀掉好資料**的覆寫路徑（寫快取/寫設定）都要有保留舊值的保護條件。
+3. `shell.remove_item` 之外，「讀取+寫快取」也是一種破壞性動作，要像對待刪除一樣謹慎。
