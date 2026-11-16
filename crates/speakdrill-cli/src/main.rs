@@ -11,7 +11,7 @@ use speakdrill_core::{
 mod tui;
 
 #[derive(Parser)]
-#[command(name = "speakdrill", version, about = "MyET 口說練習自動化：TTS 驅動、VoiceMeeter 迴路、分數報告")]
+#[command(name = "speakdrill", version, about = "MyET 口說練習自動化：TTS 驅動、虛擬音效迴路、分數報告")]
 struct Cli {
     /// 不給子命令時直接進 TUI
     #[command(subcommand)]
@@ -20,7 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// 一次性設定：偵測裝置、寫設定、設 VoiceMeeter 路由與音量、自動綁 per-app 麥克風
+    /// 一次性設定：偵測裝置、寫設定、自動偵測 VB-CABLE／VoiceMeeter 迴路、拉雙端音量、自動綁 per-app 麥克風
     Init {
         #[arg(long)] device: Option<String>,
         #[arg(long)] server: Option<String>,

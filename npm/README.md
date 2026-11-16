@@ -50,7 +50,7 @@ speakdrill doctor
 ## 快速開始
 
 ```bash
-speakdrill init                  # 偵測裝置、寫設定、自動安裝 VB-CABLE 或設 VoiceMeeter 路由、拉音量、自動綁 per-app 麥克風（registry → COM → UIA）
+speakdrill init                  # 偵測裝置、寫設定、自動安裝 VB-CABLE 或設 VoiceMeeter 路由、拉雙端音量、自動綁 per-app 麥克風（registry → COM → UIA）
 speakdrill setup                 # 手動重跑/修復 per-app 麥克風綁定（init 已自動呼叫過；失敗時才需手動）
 speakdrill doctor                # 檢查環境
 speakdrill                       # 終端機介面（預設）
@@ -72,7 +72,7 @@ speakdrill reset                 # 還原音訊路由
 
 ## 文件
 
-完整說明、架構與踩坑紀錄：<https://github.com/thumb2086/speakdrill>
+完整說明（含「新手上路」「常見問題」「疑難排解」）：<https://github.com/thumb2086/speakdrill>
 
 ## 授權
 

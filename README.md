@@ -90,10 +90,62 @@ cargo build --release
 
 ---
 
+## 新手上路（10 分鐘）
+
+目標：裝完後直接 `speakdrill`，機器自己講完一課並收到分數。
+
+**0. 前置**：MyET10 已安裝並能登入看到「我的課程」。若還沒裝虛擬音效驅動，先跑 `speakdrill init --install-driver`（跳一次 UAC），**裝完重開機**再繼續。
+
+**1. 安裝 + 初始化**
+
+```bash
+npm i -g speakdrill
+speakdrill init
+```
+
+`init` 依序做完（你不用動手）：偵測輸出裝置 → 下載 Piper TTS → 偵測虛擬迴路（VB-CABLE 或 VoiceMeeter）→ 播放端與**錄音端**音量拉到 100% → 寫設定 → 自動綁 per-app 麥克風（registry → COM → UIA）。
+最後一步看到 `✓ … 已綁定` 就是完成。
+
+**2. 檢查**
+
+```bash
+speakdrill doctor
+```
+
+每一項都應顯示 OK。有 ✗ 先看最下方「疑難排解」。
+
+**3. 第一次跑**
+
+```bash
+speakdrill
+```
+
+你會看到（範例，載入過程會先顯示預設那本、其他課本背景陸續加入）：
+
+```text
+┌speakdrill 口說自動練習────────────┐
+│ speakdrill  v0.2.33   204 課   完成 0 句  平均 0.0   MyET 累計 15.6 小時
+└──────────────────────────────────┘
+│ spawn_catalog: fetch_catalog_opts 回傳 39 課
+│ 目錄載入：39 課
+```
+
+- 左側是課本，括號內是**官方**完成率／成績（來自 MyET，不是自算）
+- `↑`/`↓` 移動、`Space` 勾選、`Enter` 執行（自動略過已完成的課）
+- `r` 重新載入目錄、`m` 啟動 MyET、`s` 請求中止、`q` 離開
+
+**4. 跑之後**
+
+- 每課完成會寫報告：`%APPDATA%\speakdrill\reports\<LessonID>.json`
+- 成績會送回 MyET（完成率會更新為官方數字）
+- 想加課本：批次執行中按 `Space`，本批結束後自動接續跑（標題顯示「追加 N 本」）
+
+---
+
 ## 設定
 
 ```bash
-speakdrill init                  # 偵測裝置 + 寫設定 + 設 VoiceMeeter 路由 + 拉音量 + 自動綁 per-app 麥克風
+speakdrill init                  # 偵測裝置 + 寫設定 + 自動偵測 VB-CABLE／VoiceMeeter 迴路 + 拉雙端音量 + 自動綁 per-app 麥克風
 speakdrill doctor                # 檢查 port / 登入 / 裝置 / VoiceMeeter / TTS / 麥克風綁定
 speakdrill init --device "Voicemeeter Input" --server https://140.125.168.213 --code BKM_1A
 ```
@@ -131,10 +183,9 @@ speakdrill init --install-driver     # 沒偵測到裝置時，自動下載並�
 > 常見現象是：「裝置看得到，但 cpal 打不開」、或 App 錄音靜音。
 > 安裝後請直接重開機，再執行 `speakdrill doctor`。
 > `doctor` 會檢查「迴路能不能真的開、App 的 per-app 麥克風綁定正不正確」。
-> （Windows 26H2 + VB-Audio 驅動特別需要）
 
+（Windows 26H2 + VB-Audio 驅動特別需要重開機；`--install-driver` 會跳一次 UAC，請按「是」。）
 
-> 安裝驅動需要管理員權限，過程中會跳一次 UAC，請按「是」。
 
 ### 自動設定 per-app 麥克風（setup）
 
@@ -204,6 +255,24 @@ speakdrill reset --yes            # 連設定檔一起刪
   讀取完成前顯示「累計 …」，讀取失敗才退回本機累計（只算本工具跑的課次）
 - 取得 MyET 官方狀態需要課程 App 已登入；重開機後首次啟動時工具會自動等頁面載入完成再抓
 
+報告範例（`BKM-GAR-2B001.json`，節錄）：
+
+```json
+{
+  "lesson_id": "BKM-GAR-2B001",
+  "total_lines": 16,
+  "title": "Unit 5.1 - Invitation 1",
+  "lines": [
+    { "index": 1, "text": "Hello?", "total": 2, "pronunciation": 1,
+      "pitch": 4, "fluency": 4, "stress": 4, "attempts": 1 }
+  ],
+  "avg": 91.2,
+  "elapsed_secs": 812
+}
+```
+
+（各句滿分 100，分項為發音/語調/流利/重音；`attempts` 是重試次數。）
+
 ---
 
 ## 實測
@@ -212,6 +281,55 @@ speakdrill reset --yes            # 連設定檔一起刪
 |---|---|
 | BKM-GAR-1A027（17 句） | 17/17，平均 88.7 |
 | BKM-GAR-1A028（13 句） | 11/11（其餘為既有進度跳過），平均 89.1 |
+
+---
+
+## 常見問題（FAQ）
+
+**左側為什麼只有走天下 6 本？**
+伺服器只回了這 6 個 CodeName 給 GEN 類型；其餘（MBA／TOEIC／MICE 等）抓不回來就不會出現在清單。
+抓到 0 個有成績時不會覆蓋既有快取（v0.2.30 起）。
+
+**2B 的課號為什麼長得像 GAR？**
+走天下系列課程的 lesson_id 都以 `BKM-GAR-…` 開頭（內容商 GAR = Getting Around in American English）。
+課本分組看 course_id 前綴（`BKM-B2B-001` → 書林美語走天下-2B）。
+
+**完成率／成績是哪來的？**
+MyET 官方目錄（`CategoryLessonScores.aspx`，含 best_score），不是本工具自己算的。
+
+**累計時數為什麼一開始顯示「累計 …」？**
+MyET 官方值是 JS 非同步填進畫面的，等它填完（通常幾秒）才換成「MyET 累計 X 小時」；
+讀取失敗才退回本機累計（只算本工具跑的課次，會是 0.0）。
+
+**選了 B2B，頁面卻顯示「2A」（第一句 2 分）？**
+v0.2.29 已修：跑課網址改用課程抓取時的 CodeName。升級 `npm i -g speakdrill@latest`。
+
+**第一句「Hello?」2 分？**
+超短句容易抓到環境音或沒量到；後續句子通常正常（87～99 分），短句可直接忽略。
+
+**MyET 視窗比例變形／超寬？**
+是 MyET（CEF）視窗大小被調壞了，不是本工具造成的。關掉 MyET 重開，或直接最大化即可。
+
+**「per-app 麥克風」是什麼？**
+Windows 的每應用程式輸入裝置。只讓 MyET 收到我們播的 TTS，不會動到你其他程式的全域麥克風。
+
+**跑課會寫入我的成績單嗎？**
+會 — MyET 伺服器會記錄成績並更新完成率（這也是左側「100%」的來源）。
+
+---
+
+## 疑難排解
+
+| 症狀 | 可能原因 | 解法 |
+|---|---|---|
+| `doctor` ✗ CDP / 登入 | MyET 沒開，或 debug port 沒帶 | 按 `m`（或 GUI「🚀 啟動 MyET」），或重開 `speakdrill` |
+| 分數全 ✗／MyET 說「太小聲」 | 錄音端（CABLE Output／Voicemeeter Out B1）音量低 | 重跑 `speakdrill init`（v0.2.33 起會拉滿錄音端） |
+| 全部 0%、官方「累計 0.0」 | MyET 剛開機時抓到相容模式的資料 | `speakdrill list --refresh`（v0.2.30 起再現不會覆蓋舊快取） |
+| 目錄載入「抓不到課程」 | MyET 未登入 | 先登入 MyET（能看到「我的課程」）再 `speakdrill` |
+| npm 安裝 `EBUSY`／`EPERM` | 舊 exe 被鎖住（TUI／MyET 在跑） | 關閉後再 `npm i -g speakdrill@latest` |
+| `doctor` ✗ 迴路打不開／錄音靜音 | 驅動未生效 | 重開機後再 `speakdrill doctor` |
+| `speakdrill` 一直卡「連不上 MyET」 | MyET 沒啟動 | 先開 MyET，或按 `m` 啟動 |
+| 追加的課本按 `s` 沒開始跑 | 中止模式不自動開始 | 按 `Enter` 手動開始，或 `x` 清空 |
 
 ---
 
