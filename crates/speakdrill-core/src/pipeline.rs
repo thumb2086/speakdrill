@@ -199,7 +199,8 @@ pub async fn run_lesson(
     let url = scoring_url(&cfg.server, &query);
     p.log("進入練習頁…");
     cdp.navigate(&url).await?;
-    tokio::time::sleep(Duration::from_secs(10)).await;
+    // navigate() 已等 readyState=complete，console 事件有緩衝 — 固定 10 秒純粹是 padding（每課 10 秒空跑）
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     for _ in 0..6 {
         if handle_dialog(cdp, opts.resume, true).await.is_some() {
