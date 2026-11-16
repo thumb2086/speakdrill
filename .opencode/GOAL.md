@@ -100,5 +100,13 @@
   - 修正 README 過期的「Shift+Space 整課程加入佇列」（實際無此功能）
   - 舊快取相容（serde default + 讀取覆寫）；unit tests 全綠；v0.2.29 CI (43788651775) ✓（verify/build/npm）；`npm i -g` → 0.2.29
   - 使用者本次中止了跑錯的 B2B 批次（第一句 2 分已寫入 MyET 紀錄 — 無法撤回）
+- [2026-11-16] checkpoint13：v0.2.30~v0.2.33 發布 ✅
+  - v0.2.30（載入賽跑修復）：TUI 自動啟動 MyET 後太早抓目錄/官方時數 → 目錄被「0 個有成績」的劣化結果覆寫（全部 0%）、官方時數吃到 placeholder「0.0 小時」。
+    修正：抓目錄前等 readyState==complete 且 URL 含 AudreyWeb（30 秒）；官方統計改讀元素 id（lblLearnTimeValue/Unit、divCertificateValue、lblExpValue）輪詢到「證書與 LV 皆非空」才採用；
+    目錄快取保護（refresh=false 且新抓 0 個有成績、舊快取 ≥1 個 → 保留舊快取）；實測 live fetch → 15.6 小時 / LV 44 / 證書 16；
+    v0.2.30 CI (43791366991) ✓；使用者即時 --refresh 修復快取（1A/1B/2A 共 114 課有積分找回）
+  - v0.2.31：CLI help/doctor/run 指引同步到自動綁定時代（Init/Doctor 說明、doctor/run 綁定失敗時指引 speakdrill setup 取代指路 ms-settings）
+  - v0.2.32：文件全面同步（README「輸出」改寫 — 官方目錄成績、官方累計時數；npm README「使用時你會看到」；LESSONS #10 readyState≠資料填完）；CI (43791980980) ✓
+  - v0.2.33：init [4/6] 通用化 — 不再只拉 VoiceMeeter B1，依 routes() 找 mic_device 把錄音端（CABLE Output／B1）拉到 100%；結尾加下一步引導；實測在使用者機器上 [4/6] 顯示錄音端 100% ✓、[6/6] registry 已綁定直接結束（不開視窗）；CI (43792265325) ✅（發布中，npm latest 尚未包含）
 - Status: completed
-- Updated: 2026-11-16T10:00:00+08:00
+- Updated: 2026-11-16T10:45:00+08:00
