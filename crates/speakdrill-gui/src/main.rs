@@ -395,7 +395,7 @@ fn group_lesson(
     books_names: &std::collections::HashMap<String, String>,
     l: &LessonRef,
 ) {
-    if l.best_score.is_some() {
+    if l.done() {
         completed.insert(l.lesson_id.clone());
     }
     // 按 course_id 前綴分組（例：BKM-B2A-001 → BKM-B2A）

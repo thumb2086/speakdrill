@@ -26,7 +26,7 @@ pub struct LessonRef {
 
 impl LessonRef {
     pub fn done(&self) -> bool {
-        self.best_score.is_some()
+        self.best_score.is_some_and(|s| s > 0.0)
     }
 
     /// 給 UI 顯示用：名稱優先，沒有就退回代碼；已練過加 ✓ 與分數
