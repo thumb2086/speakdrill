@@ -93,5 +93,12 @@
     TUI footer 補上 r 重載 / m 啟動 MyET / s 停止 提示；README / npm README 安裝流程更新；
     v0.2.28 CI (43762953986)：verify/build/npm ✓；`npm i -g` → 0.2.28
   - npm 安裝被舊 TUI 行程（pid 41860，鎖住 speakdrill.exe）擋下 EBUSY → 關閉該行程後安裝成功
+- [2026-11-16] checkpoint12：v0.2.29 發布（CodeName 帶錯修復 + 執行中追加課本）✅
+  - 事故：TUI 選 BKM-B2B，MyET 頁面顯示 2A/Unit 5.1、第一句 2 分 — pipeline::run_lesson 一律用 cfg.code（BKM_2A）
+  - 修正：LessonRef.code 存抓取時的 CodeName，跑課網址用它；`speakdrill run` 無 --code 時先在設定的 code 找、找不到掃全部目錄定位；CLI/TUI/GUI 全改
+  - 新功能：批次執行中按 Space 勾選課本 → 本批結束後自動接續跑（TUI 標題/狀態列即時顯示追加數；GUI 同步；停止中不自動開始；計數器跨批保留）；佇列在批次開始時被消耗
+  - 修正 README 過期的「Shift+Space 整課程加入佇列」（實際無此功能）
+  - 舊快取相容（serde default + 讀取覆寫）；unit tests 全綠；v0.2.29 CI (43788651775) ✓（verify/build/npm）；`npm i -g` → 0.2.29
+  - 使用者本次中止了跑錯的 B2B 批次（第一句 2 分已寫入 MyET 紀錄 — 無法撤回）
 - Status: completed
-- Updated: 2026-11-16T05:30:00+08:00
+- Updated: 2026-11-16T10:00:00+08:00
