@@ -621,7 +621,9 @@ impl eframe::App for App {
             .resizable(true)
             .default_width(360.0)
             .show(ctx, |ui| {
-                let qlabel = if self.running {
+                let qlabel = if self.running && self.queue.is_empty() {
+            "課本（執行中 — 勾選即追加，本批結束後接著跑）".to_string()
+        } else if self.running {
             format!("課本（追加 {} 本·本批結束後接著跑）", self.queue.len())
         } else {
             format!("課本（已勾 {}）— 勾選加入佇列", self.queue.len())

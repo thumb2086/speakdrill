@@ -128,11 +128,17 @@ mod tests {
     }
 }
 
-/// 產生正常模式下的 status 字串
+/// 產生 status 字串（執行中顯示追加提示，平常顯示完整按鍵列）
 fn build_status(app: &App) -> String {
     let queued = app.queue.len();
     if app.coursebooks.is_empty() {
         "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into()
+    } else if app.running {
+        if queued > 0 {
+            format!("■ 執行中 — 已追加 {queued} 本（本批結束後接著跑）· Space 續選/取消 · s 停止 · PgUp/PgDn 捲動 · End 回最新")
+        } else {
+            "■ 執行中 — Space 勾選課本＝本批結束後追加 · s 停止 · PgUp/PgDn 捲動紀錄 · End 回最新".into()
+        }
     } else {
         format!(
             "{} 本課本（{}）  ↑/↓ 移動 · Space 勾選/追加 · Enter 執行（{}）· i 課本內容 · a 全選 · x 清空 · b 全部 · r 重載 · m 啟動 MyET · s 停止 · PgUp/PgDn 捲動 · End 回最新 · q 離開",
