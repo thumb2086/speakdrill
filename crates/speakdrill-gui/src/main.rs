@@ -517,34 +517,13 @@ impl eframe::App for App {
                         0.0
                     };
                     self.status = format!("完成：{} 句，平均 {:.1}", self.done, avg);
-                    // 追加課本：本批結束後自動接著跑（按停止則不自動開始，可按「▶ 跑佇列」手動開始）
-                    if self.stop.load(Ordering::Relaxed) {
-                        if !self.queue.is_empty() {
-                            push_log(
-                                self,
-                                format!(
-                                    "（停止中：追加的 {} 本課本不會自動開始，按「▶ 跑佇列」可開始）",
-                                    self.queue.len()
-                                ),
-                            );
-                        }
-                    } else if !self.queue.is_empty() {
-                        let selected = std::mem::take(&mut self.queue);
-                        let (picked, skipped) = expand_coursebooks(self, &selected);
-                        if skipped > 0 {
-                            push_log(self, format!("略過已完成 {} 課", skipped));
-                        }
-                        if picked.is_empty() {
-                            push_log(self, "（追加的課本都已完成）".into());
-                        } else {
-                            push_log(
-                                self,
-                                format!("接續跑追加：{} 課（{} 本課本）", picked.len(), selected.len()),
-                            );
-                            self.status = format!("接續追加執行中（{} 課）", picked.len());
-                            self.running = true;
-                            start_run(self.tx.clone(), self.stop.clone(), picked.clone(), self.pass);
-                        }
+                    // 追加課本不自動接跑：保留在佇列，按「▶ 跑佇列」才開始
+                    if !self.queue.is_empty() {
+                        push_log(
+                            self,
+                            format!("已追加 {} 本課本 — 按「▶ 跑佇列」開始（或「✖ 清佇列」清空）", self.queue.len()),
+                        );
+                        self.status = format!("完成 · 待跑佇列 {} 本（按「▶ 跑佇列」開始）", self.queue.len());
                     }
                 }
                 Ev::SetupDone => {
@@ -697,13 +676,19 @@ impl eframe::App for App {
             .resizable(true)
             .default_width(360.0)
             .show(ctx, |ui| {
-                let qlabel = if self.running && self.queue.is_empty() {
-            "課本（執行中 — 勾選即追加，本批結束後接著跑）".to_string()
-        } else if self.running {
-            format!("課本（追加 {} 本·本批結束後接著跑）", self.queue.len())
-        } else {
-            format!("課本（已勾 {}）— 勾選加入佇列", self.queue.len())
-        };
+                let qlabel = if !self.queue.is_empty() {
+                    let order = self
+                        .queue
+                        .iter()
+                        .map(|&i| self.coursebooks.get(i).map(|c| c.0.as_str()).unwrap_or("?"))
+                        .collect::<Vec<_>>()
+                        .join(" → ");
+                    format!("課本 · 佇列 {} 本：{}", self.queue.len(), order)
+                } else if self.running {
+                    "課本（執行中 — 勾選即追加，本批結束按「▶ 跑佇列」開始）".to_string()
+                } else {
+                    "課本 — 勾選加入佇列，按「▶ 跑佇列」開始".to_string()
+                };
         ui.label(qlabel);
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for (i, (code, name, lessons)) in self.coursebooks.iter().enumerate() {
@@ -711,7 +696,8 @@ impl eframe::App for App {
                         let done = lessons.iter().filter(|l| self.completed.contains(&l.lesson_id)).count();
                         let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u32 } else { 0 };
                         let queued = self.queue.contains(&i);
-                        let mark = if queued { "● " } else { "   " };
+                        let pos = self.queue.iter().position(|&x| x == i).map(|p| p + 1);
+                        let mark = pos.map(|p| format!("●#{p} ")).unwrap_or_else(|| "    ".to_string());
                         let row = format!("{}{}  {}  {}/{} ({}%)", mark, code, name, done, total, pct);
                         ui.horizontal(|ui| {
                             let mut checked = queued;

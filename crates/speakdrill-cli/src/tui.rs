@@ -138,9 +138,9 @@ fn build_status(app: &App) -> String {
         "目錄是空的 — 可能沒登入或 CodeName 不對；按 r 重試".into()
     } else if app.running {
         if queued > 0 {
-            format!("■ 執行中 — 已追加 {queued} 本（本批結束後接著跑）· Space 續選/取消 · s 停止 · PgUp/PgDn 捲動 · End 回最新")
+            format!("■ 執行中 — 已追加 {queued} 本（本批結束按 Enter 開始）· Space 續選/取消 · s 停止 · PgUp/PgDn 捲動 · End 回最新")
         } else {
-            "■ 執行中 — Space 勾選課本＝本批結束後追加 · s 停止 · PgUp/PgDn 捲動紀錄 · End 回最新".into()
+            "■ 執行中 — Space 勾選課本＝追加，本批結束按 Enter 開始 · s 停止 · PgUp/PgDn 捲動紀錄 · End 回最新".into()
         }
     } else {
         format!(
@@ -330,22 +330,10 @@ fn event_loop(
             apply(app, ev);
             // 本批結束後，自動接續跑執行中勾選的「追加課本」（停止中不自動開始）
             if is_batch_done {
-                if stop.load(Ordering::Relaxed) {
-                    if !app.queue.is_empty() {
-                        push_log(app, format!("（停止中：追加的 {} 本課本不會自動開始，按 Enter 可開始）", app.queue.len()));
-                    }
-                } else if !app.queue.is_empty() {
-                    let selected = std::mem::take(&mut app.queue);
-                    let (picked, skipped) = expand_picked(app, &selected);
-                    if skipped > 0 {
-                        push_log(app, format!("略過已完成 {} 課", skipped));
-                    }
-                    if picked.is_empty() {
-                        push_log(app, "（追加的課本都已完成）".into());
-                    } else {
-                        push_log(app, format!("接續跑追加：{} 課（{} 本課本）", picked.len(), selected.len()));
-                        start_batch(app, rt, tx.clone(), stop.clone(), picked);
-                    }
+                // 追加的課本不自動接跑：保留在佇列，按 Enter 才會開始
+                if !app.queue.is_empty() {
+                    let n = app.queue.len();
+                    push_log(app, format!("已追加 {n} 本課本 — 按 Enter 開始（或 x 清空佇列）"));
                 }
             }
         }
@@ -777,19 +765,27 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
             let total = lessons.len();
             let done = lessons.iter().filter(|l| app.completed.contains(&l.lesson_id)).count();
             let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u32 } else { 0 };
-            let mark = if app.queue.contains(&i) { "●" } else { " " };
+            // 佇列位置（1-based）；非佇列顯示空白
+            let pos = app.queue.iter().position(|&x| x == i).map(|p| p + 1);
+            let mark = pos.map(|p| format!("[{p}]")).unwrap_or_else(|| "   ".to_string());
             ListItem::new(TLine::from(format!("{} {}  {}  {}/{} ({:.0}%)", mark, code, name, done, total, pct)))
-                .style(if app.queue.contains(&i) {
+                .style(if pos.is_some() {
                     Style::default().fg(Color::Yellow)
                 } else {
                     Style::default()
                 })
         })
         .collect();
-    let list_title = if app.running && !app.queue.is_empty() {
-        format!("課本（追加 {} 本·本批結束後接著跑）", app.queue.len())
+    let list_title = if !app.queue.is_empty() {
+        let order = app
+            .queue
+            .iter()
+            .map(|&i| app.coursebooks.get(i).map(|c| c.0.as_str()).unwrap_or("?"))
+            .collect::<Vec<_>>()
+            .join(" → ");
+        format!("課本（佇列 {} 本：{}）", app.queue.len(), order)
     } else {
-        format!("課本（已勾 {}）", app.queue.len())
+        "課本（Enter 跑選取）".to_string()
     };
     let list = List::new(items).block(
         Block::default()
