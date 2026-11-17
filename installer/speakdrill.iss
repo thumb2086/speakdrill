@@ -14,7 +14,6 @@ DefaultGroupName=speakdrill
 DisableDirPage=no
 DisableProgramGroupPage=no
 PrivilegesRequired=admin
-PossibleNeedToRestart=no
 OutputBaseFilename=speakdrill-setup-{#Version}
 OutputDir=..\
 Compression=lzma2
