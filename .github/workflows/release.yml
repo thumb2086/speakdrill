@@ -73,7 +73,7 @@ jobs:
           $setup = Get-ChildItem 'speakdrill-setup-*.exe' | Select-Object -First 1
           Copy-Item $setup.FullName "$out/speakdrill-setup-$Version-win32-x64.exe"
           Compress-Archive -Path "$out/speakdrill.exe", "$out/speakdrill-gui.exe" `
-            -DestinationPath "speakdrill-${{ github.ref_name }}-win32-x64.zip"
+            -DestinationPath "$out/speakdrill-${{ github.ref_name }}-win32-x64.zip"
 
       - name: Release
         uses: softprops/action-gh-release@v2
