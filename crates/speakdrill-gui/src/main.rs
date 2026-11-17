@@ -769,11 +769,13 @@ impl eframe::App for App {
             .frame(egui::Frame::default().fill(egui::Color32::from_rgb(16, 18, 23)))
             .show(ctx, |ui| {
                 ui.label("紀錄");
-                egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
-                    for l in &self.logs {
-                        ui.monospace(l);
-                    }
-                });
+                egui::ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .show_rows(ui, 18.0, self.logs.len(), |ui, row_range| {
+                        for i in row_range {
+                            ui.monospace(&self.logs[i]);
+                        }
+                    });
             });
 
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
