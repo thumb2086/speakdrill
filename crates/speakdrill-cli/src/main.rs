@@ -30,6 +30,8 @@ enum Cmd {
     },
     /// 檢查 npm 上的最新版，並顯示更新指令（Windows 無法從程式內就地覆寫執行中的 exe，故只提示）
     Update,
+    /// 自動下載並安裝最新版（下載 MSI 安裝程式並靜默安裝，需管理員權限）
+    SelfUpdate,
     /// 檢查環境（port / 登入 / 裝置 / VoiceMeeter / TTS / 麥克風綁定）
     Doctor,
     /// 還原：停止把 TTS 送到 B1，並印出如何清掉 per-app 裝置設定
@@ -113,6 +115,7 @@ fn main() -> Result<()> {
             rt.block_on(cmd_init(device, server, code, install_driver))
         }
         Cmd::Update => rt.block_on(cmd_update()),
+        Cmd::SelfUpdate => rt.block_on(cmd_self_update()),
         Cmd::Doctor => rt.block_on(cmd_doctor()),
         Cmd::Reset { yes } => rt.block_on(cmd_reset(yes)),
         Cmd::Run { lesson, course, resume, pass } => {
@@ -361,6 +364,88 @@ async fn cmd_update() -> Result<()> {
     Ok(())
 }
 
+/// `speakdrill self-update`：自動下載並安裝最新版（下載 MSI 並靜默安裝，需管理員權限）
+async fn cmd_self_update() -> Result<()> {
+    let current = env!("CARGO_PKG_VERSION");
+    println!("目前版本：v{current}");
+
+    // 從 GitHub Releases API 取得最新版本資訊
+    let client = reqwest::Client::new();
+    let url = "https://api.github.com/repos/thumb2086/speakdrill/releases/latest";
+    let resp = client
+        .get(url)
+        .header("User-Agent", "speakdrill")
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        println!("⚠ 無法取得 GitHub Releases 資訊");
+        println!("請手動從 https://github.com/thumb2086/speakdrill/releases 下載最新版");
+        return Ok(());
+    }
+
+    let release: serde_json::Value = resp.json().await?;
+    let tag_name = release["tag_name"].as_str().unwrap_or("").trim_start_matches('v');
+    let empty_vec = vec![];
+    let assets = release["assets"].as_array().unwrap_or(&empty_vec);
+
+    // 找 MSI 安裝程式
+    let msi_asset = assets.iter().find(|a| {
+        a["name"].as_str().unwrap_or("").ends_with(".msi")
+    });
+
+    let msi_asset = match msi_asset {
+        Some(a) => a,
+        None => {
+            println!("⚠ 找不到 MSI 安裝程式");
+            println!("請手動從 https://github.com/thumb2086/speakdrill/releases 下載最新版");
+            return Ok(());
+        }
+    };
+
+    let latest_version = tag_name;
+    let download_url = msi_asset["browser_download_url"].as_str().unwrap_or("");
+
+    if version_gt(latest_version, env!("CARGO_PKG_VERSION")) {
+        println!("發現新版本：v{latest_version}");
+        println!("下載安裝程式：{download_url}");
+
+        // 下載 MSI
+        let tmp_dir = std::env::temp_dir();
+        let msi_path = tmp_dir.join(format!("speakdrill-{latest_version}-win32-x64.msi"));
+        
+        println!("下載中...");
+        let mut resp = client.get(download_url).send().await?;
+        let mut file = std::fs::File::create(&msi_path)?;
+        let mut stream = resp.bytes_stream();
+        use futures_util::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            use std::io::Write;
+            file.write_all(&chunk?)?;
+        }
+        println!("✓ 下載完成：{}", msi_path.display());
+
+        // 靜默安裝 MSI (需管理員權限)
+        println!("安裝中（需管理員權限，UAC 提示請選「是」）...");
+        let status = std::process::Command::new("msiexec.exe")
+            .args(["/i", msi_path.to_str().unwrap(), "/qn", "/norestart"])
+            .status()?;
+
+        if status.success() {
+            println!("✓ 安裝完成！請重新啟動 speakdrill");
+        } else {
+            println!("⚠ 安裝失敗（可能需要管理員權限），請嘗試以管理員身分執行：");
+            println!("  msiexec /i \"{}\" /qn /norestart", msi_path.display());
+        }
+    } else {
+        println!("✓ 已是最新版 (v{current})");
+    }
+
+    Ok(())
+}
+
+// ---------------- version test ----------------
 #[cfg(test)]
 mod tests {
     use super::version_gt;

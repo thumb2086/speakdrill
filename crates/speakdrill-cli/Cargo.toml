@@ -18,3 +18,5 @@ clap.workspace = true
 ratatui = "0.28"
 crossterm = "0.28"
 unicode-width = "0.1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?define ProductVersion = "0.2.42"?>
+  <?define ProductName = "speakdrill"?>
+  <?define Manufacturer = "speakdrill contributors"?>
+  <?define UpgradeCode = "PUT-YOUR-UPGRADE-CODE-GUID-HERE"?>
+  <?define InstallDir = "speakdrill"?>
+
+  <Product Id="*" 
+           Name="$(var.ProductName) $(var.ProductVersion)" 
+           Language="1033" 
+           Version="$(var.ProductVersion)" 
+           Manufacturer="$(var.Manufacturer)" 
+           UpgradeCode="$(var.UpgradeCode)">
+    
+    <Package InstallerVersion="500" 
+             Compressed="yes" 
+             InstallScope="perMachine" 
+             Platform="x64"
+             Description="speakdrill - MyET 口說自動練習工具"
+             Comments="speakdrill MyET 口說自動練習工具"
+             Keywords="speakdrill,MyET,TTS,automation"/>
+    
+    <Media Id="1" Cabinet="speakdrill.cab" EmbedCab="yes" />
+    
+    <Property Id="ARPNOMODIFY" Value="1"/>
+    <Property Id="ARPNOREPAIR" Value="1"/>
+    
+    <MajorUpgrade DowngradeErrorMessage="已安裝較新版本的 speakdrill。" 
+                  Schedule="afterInstallInitialize"/>
+    
+    <Feature Id="Complete" Title="speakdrill" Level="1">
+      <ComponentGroupRef Id="ProductComponents"/>
+    </Feature>
+    
+    <!-- 安裝路徑 -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="$(var.InstallDir)">
+          <Component Id="MainExecutable" Guid="*">
+            <File Id="speakdrill.exe" Source="..\target\release\speakdrill.exe" KeyPath="yes"/>
+          </Component>
+          <Component Id="GuiExecutable" Guid="*">
+            <File Id="speakdrill-gui.exe" Source="..\target\release\speakdrill-gui.exe" KeyPath="yes"/>
+          </Component>
+        </Directory>
+      </Directory>
+      
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="speakdrill"/>
+      </Directory>
+    </Directory>
+    
+    <!-- 捷徑 -->
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcuts" Guid="*">
+        <Shortcut Id="speakdrillShortcut" 
+                  Name="speakdrill (CLI)" 
+                  Target="[INSTALLFOLDER]speakdrill.exe" 
+                  WorkingDirectory="INSTALLFOLDER"/>
+        <Shortcut Id="speakdrillGuiShortcut" 
+                  Name="speakdrill GUI" 
+                  Target="[INSTALLFOLDER]speakdrill-gui.exe" 
+                  WorkingDirectory="INSTALLFOLDER"/>
+        <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
+        <RegistryValue Root="HKCU" 
+                       Key="Software\speakdrill" 
+                       Name="installed" 
+                       Type="integer" 
+                       Value="1" 
+                       KeyPath="yes"/>
+      </Component>
+    </DirectoryRef>
+    
+    <ComponentGroup Id="ProductComponents">
+      <ComponentRef Id="MainExecutable"/>
+      <ComponentRef Id="GuiExecutable"/>
+      <ComponentRef Id="StartMenuShortcuts"/>
+    </ComponentGroup>
+    
+    <!-- 安裝後自動加入 PATH -->
+    <CustomAction Id="AddToPath" 
+                  BinaryKey="WixCA" 
+                  DllEntry="WixQuietExec64" 
+                  Execute="deferred" 
+                  Impersonate="no" 
+                  Return="check" 
+                  Value='[SystemFolder]cmd.exe /c setx /M PATH "%PATH%;[INSTALLFOLDER]"'/>
+    
+    <InstallExecuteSequence>
+      <Custom Action="AddToPath" After="InstallFinalize">NOT Installed</Custom>
+    </InstallExecuteSequence>
+    
+  </Product>
+</Wix>
