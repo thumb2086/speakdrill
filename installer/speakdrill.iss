@@ -38,7 +38,7 @@ Name: "{group}\Uninstall speakdrill"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\speakdrill"; Filename: "{app}\speakdrill.exe"; Tasks: desktopicon
 
 [Registry]
-Root: HKLM; Subkey: "SOFTWARE\speakdrill"; ValueType: dword; ValueName: "Installed"; ValueData: 1; Flags: uninsdeletevalue uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\speakdrill"; ValueType: dword; ValueName: "Installed"; ValueData: 1; Flags: uninsdeletekey
 
 [Run]
 Filename: "{app}\speakdrill-gui.exe"; Description: "Launch speakdrill GUI"; Flags: postinstall skipifsilent nowait
