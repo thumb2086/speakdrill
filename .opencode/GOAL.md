@@ -122,5 +122,13 @@
   - v0.2.37：進入 ScoringPage.aspx 後固定 sleep 10s → 1.5s（navigate() 已等 readyState=complete；console 事件有緩衝 — 10 秒純 padding）
   - 使用者問「以他的判別，先掛機，時間會比較長嗎」— 指的就是這個 10 秒空跑
   - 使用者機器 npm 鎖定問題頻繁（EBUSY）：v0.2.37 起全域更新改由使用者關 TUI 後自行 `npm i -g speakdrill@latest`（v0.2.36 已裝）
+- [2026-11-17/18] checkpoint16：多次 npm 發布失敗（reset 了沒提交）→ v0.2.45~v0.2.52 npm 全卡在 Validating
+  - GUI「堵塞」卡頓：根因 = 紀錄面板 stick_to_bottom+500 行 monospace 重畫，每次 200 ms 強制 repaint
+  - 修正：CentralPanel 紀錄區改用 `ScrollArea::show_rows()` 僅渲染可見行；實測閒置 CPU 0% (之前持續吃 CPU)
+  - v0.2.43~v0.2.52 多次發佈失敗：MSI → 去掉 MSI → NPI (並非 npm bug，release.yml 在 build job 多條路徑被 git checkout tag 檔覆蓋，Release 產生但 npm 的附件驗證通過後反而失敗)
+  - 修改：砍掉 installer（Inno Setup 只留 config，不在 CI 打包），回到 EXEs+zip 流程
+  - v0.2.54 完成 npm publish，但 npm `latest` 停在 0.2.46（語證 Validating — npm 對 thumb2086 帳號，不是 CI bug）
+  - v0.2.55 完成 npm publish（追加課本按 Enter 不自動接跑 + 佇列位置提示）
+  - v0.2.56：self-update 改 npm（仿 OpenCode）；npm 只發 TUI；驗證 Mac 不支援、Windows-only
 - Status: completed
-- Updated: 2026-11-16T12:10:00+08:00
+- Updated: 2026-11-18T15:10:00+08:00
