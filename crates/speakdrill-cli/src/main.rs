@@ -30,7 +30,7 @@ enum Cmd {
     },
     /// 檢查 npm 上的最新版，並顯示更新指令（Windows 無法從程式內就地覆寫執行中的 exe，故只提示）
     Update,
-    /// 自動下載並安裝最新版（下載 MSI 安裝程式並靜默安裝，需管理員權限）
+    /// 自動下載並安裝最新版（優先下載 Inno Setup 安裝程式，會關閉 app 並覆蓋安裝）
     SelfUpdate,
     /// 檢查環境（port / 登入 / 裝置 / VoiceMeeter / TTS / 麥克風綁定）
     Doctor,
@@ -362,7 +362,9 @@ async fn cmd_update() -> Result<()> {
     Ok(())
 }
 
-/// `speakdrill self-update`：自動下載並安裝最新版（下載 MSI 並靜默安裝，需管理員權限）
+/// `speakdrill self-update`：自動下載並安裝最新版
+/// 優先使用 Inno Setup 安裝程式（speakdrill-setup-*.exe，會關閉 app、裝好覆蓋舊版）
+/// 沒有 setup 程式時退回 zip（解壓覆蓋安裝目錄裡的舊 exe，需先關閉 speakdrill）
 async fn cmd_self_update() -> Result<()> {
     let current = env!("CARGO_PKG_VERSION");
     println!("目前版本：v{current}");
@@ -388,56 +390,99 @@ async fn cmd_self_update() -> Result<()> {
     let empty_vec = vec![];
     let assets = release["assets"].as_array().unwrap_or(&empty_vec);
 
-    // 找 MSI 安裝程式
-    let msi_asset = assets.iter().find(|a| {
-        a["name"].as_str().unwrap_or("").ends_with(".msi")
+    // 優先找 Inno Setup 安裝程式
+    let setup_asset = assets.iter().find(|a| {
+        let name = a["name"].as_str().unwrap_or("");
+        name.starts_with("speakdrill-setup-") && name.ends_with(".exe")
+    });
+    let zip_asset = assets.iter().find(|a| {
+        a["name"].as_str().unwrap_or("").ends_with(".zip")
     });
 
-    let msi_asset = match msi_asset {
-        Some(a) => a,
-        None => {
-            println!("⚠ 找不到 MSI 安裝程式");
-            println!("請手動從 https://github.com/thumb2086/speakdrill/releases 下載最新版");
-            return Ok(());
-        }
+    let latest_version = tag_name;
+    let (download_url, tmp_name, use_installer) = if let Some(a) = setup_asset {
+        (
+            a["browser_download_url"].as_str().unwrap_or("").to_string(),
+            a["name"].as_str().unwrap_or("speakdrill-setup.exe").to_string(),
+            true,
+        )
+    } else if let Some(a) = zip_asset {
+        (
+            a["browser_download_url"].as_str().unwrap_or("").to_string(),
+            a["name"].as_str().unwrap_or("speakdrill.zip").to_string(),
+            false,
+        )
+    } else {
+        println!("⚠ 找不到可下載的發佈檔（setup exe / zip）");
+        println!("請手動從 https://github.com/thumb2086/speakdrill/releases 下載最新版");
+        return Ok(());
     };
 
-    let latest_version = tag_name;
-    let download_url = msi_asset["browser_download_url"].as_str().unwrap_or("");
+    if !version_gt(latest_version, env!("CARGO_PKG_VERSION")) {
+        println!("✓ 已是最新版 (v{current})");
+        return Ok(());
+    }
 
-    if version_gt(latest_version, env!("CARGO_PKG_VERSION")) {
-        println!("發現新版本：v{latest_version}");
-        println!("下載安裝程式：{download_url}");
+    println!("發現新版本：v{latest_version}");
+    println!("下載中...");
 
-        // 下載 MSI
-        let tmp_dir = std::env::temp_dir();
-        let msi_path = tmp_dir.join(format!("speakdrill-{latest_version}-win32-x64.msi"));
-        
-        println!("下載中...");
-        let mut resp = client.get(download_url).send().await?;
-        let mut file = std::fs::File::create(&msi_path)?;
-        let mut stream = resp.bytes_stream();
-        use futures_util::StreamExt;
-        while let Some(chunk) = stream.next().await {
-            use std::io::Write;
-            file.write_all(&chunk?)?;
-        }
-        println!("✓ 下載完成：{}", msi_path.display());
+    let tmp_dir = std::env::temp_dir().join("speakdrill-update");
+    std::fs::create_dir_all(&tmp_dir)?;
+    let tmp_path = tmp_dir.join(&tmp_name);
 
-        // 靜默安裝 MSI (需管理員權限)
-        println!("安裝中（需管理員權限，UAC 提示請選「是」）...");
-        let status = std::process::Command::new("msiexec.exe")
-            .args(["/i", msi_path.to_str().unwrap(), "/qn", "/norestart"])
+    let mut resp = client.get(&download_url).send().await?;
+    let mut file = std::fs::File::create(&tmp_path)?;
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        use std::io::Write;
+        file.write_all(&chunk?)?;
+    }
+    println!("✓ 下載完成：{}", tmp_path.display());
+
+    if use_installer {
+        // Inno Setup 安裝程式會自動關閉正在執行的 speakdrill、覆蓋安裝
+        println!("安裝中（Inno Setup 會關閉 app 並覆蓋舊版，請稍候）...");
+        let status = std::process::Command::new(&tmp_path)
+            .arg("/VERYSILENT")
+            .arg("/CLOSEAPPLICATIONS")
+            .arg("/NORESTART")
             .status()?;
 
         if status.success() {
-            println!("✓ 安裝完成！請重新啟動 speakdrill");
+            println!("✓ 安裝完成！請重新開啟 speakdrill");
         } else {
-            println!("⚠ 安裝失敗（可能需要管理員權限），請嘗試以管理員身分執行：");
-            println!("  msiexec /i \"{}\" /qn /norestart", msi_path.display());
+            println!("⚠ 安裝程式回傳非零（{status}），請手動執行：{}", tmp_path.display());
         }
     } else {
-        println!("✓ 已是最新版 (v{current})");
+        // zip：需要先解壓再覆蓋安裝目錄
+        println!("解壓縮中...");
+        let extract_dir = tmp_dir.join("extracted");
+        let extract_str = extract_dir.to_string_lossy().to_string();
+        let zip_str = tmp_path.to_string_lossy().to_string();
+        let status = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command",
+                &format!("Expand-Archive -Path '{}' -DestinationPath '{}' -Force", zip_str, extract_str)])
+            .status()?;
+        if !status.success() {
+            println!("⚠ 解壓失敗，請手動從 https://github.com/thumb2086/speakdrill/releases 下載最新版");
+            return Ok(());
+        }
+        // 找安裝目錄（目前程式所在位置）
+        let exe_path = std::env::current_exe()?;
+        let install_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
+        // 覆蓋可執行檔（正在執行的 exe 會鎖住，覆蓋會失敗）
+        for name in ["speakdrill.exe", "speakdrill-gui.exe"] {
+            let src = extract_dir.join(name);
+            let dst = install_dir.join(name);
+            if src.exists() {
+                match std::fs::copy(&src, &dst) {
+                    Ok(_) => println!("✓ 已更新 {}", dst.display()),
+                    Err(e) => println!("⚠ 無法覆蓋 {}（{e}）：請先關閉 speakdrill，或以管理員執行", dst.display()),
+                }
+            }
+        }
+        println!("✓ 更新完成（如上方有警告，請關閉 speakdrill 後重開）");
     }
 
     Ok(())
