@@ -32,7 +32,7 @@ jobs:
           if ($tag -ne $ws) { throw "tag ($tag) 與 Cargo.toml / npm/package.json ($ws) 不一致；請先 bump 版本再打 tag" }
           Write-Output "Version OK: $ws"
 
-  # ── 1. 在 Windows 上編譯（CLI + GUI + MSI 安裝程式），並上傳到 Releases ─────────────
+  # ── 1. 在 Windows 上編譯（CLI + GUI），EXEs 與 zip 直接上傳到 Releases ─────────────
   build:
     needs: verify
     runs-on: windows-latest
@@ -50,26 +50,15 @@ jobs:
       - name: Build (CLI + GUI)
         run: cargo build --release -p speakdrill-cli -p speakdrill-gui
 
-      - name: Install WiX Toolset
-        run: |
-          choco install wixtoolset --version 3.11.2 --no-progress -y
-          refreshenv
-
-      - name: Build MSI Installer
+      - name: Package
         shell: pwsh
         run: |
-          $Version = $env:GITHUB_REF_NAME -replace '^v',''
-          & ./installer/build-installer.ps1 -Version $Version
-
-      - name: Prepare Release Artifacts
-        shell: pwsh
-        run: |
-          $Version = $env:GITHUB_REF_NAME -replace '^v',''
           $out = "dist/win32-x64"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item "target/release/speakdrill.exe"     "$out/"
           Copy-Item "target/release/speakdrill-gui.exe" "$out/"
-          Copy-Item "speakdrill-$($env:GITHUB_REF_NAME -replace '^v','')-win32-x64.msi" "$out/"
+          Compress-Archive -Path "$out/*" `
+            -DestinationPath "speakdrill-${{ github.ref_name }}-win32-x64.zip"
 
       - name: Release
         uses: softprops/action-gh-release@v2
@@ -77,12 +66,12 @@ jobs:
           files: |
             dist/win32-x64/speakdrill.exe
             dist/win32-x64/speakdrill-gui.exe
-            speakdrill-${{ github.ref_name }}-win32-x64.msi
+            speakdrill-${{ github.ref_name }}-win32-x64.zip
           generate_release_notes: true
 
   # ── 2. 發佈 npm 套件（Trusted Publisher / OIDC，不需 token）─────────────
   npm:
-    needs: verify
+    needs: [verify, build]
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
