@@ -50,23 +50,35 @@ jobs:
       - name: Build (CLI + GUI)
         run: cargo build --release -p speakdrill-cli -p speakdrill-gui
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Inno Setup Installer
+        shell: pwsh
+        run: |
+          $Version = $env:GITHUB_REF_NAME -replace '^v',''
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc /DVersion=$Version installer\speakdrill.iss
+
       - name: Package
         shell: pwsh
         run: |
+          $Version = $env:GITHUB_REF_NAME -replace '^v',''
           $out = "dist/win32-x64"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item "target/release/speakdrill.exe"     "$out/"
           Copy-Item "target/release/speakdrill-gui.exe" "$out/"
-          Compress-Archive -Path "$out/*" `
+          $setup = Get-ChildItem 'speakdrill-setup-*.exe' | Select-Object -First 1
+          Copy-Item $setup.FullName "$out/speakdrill-setup-$Version-win32-x64.exe"
+          Compress-Archive -Path "$out/speakdrill.exe", "$out/speakdrill-gui.exe" `
             -DestinationPath "speakdrill-${{ github.ref_name }}-win32-x64.zip"
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/win32-x64/speakdrill.exe
-            dist/win32-x64/speakdrill-gui.exe
-            speakdrill-${{ github.ref_name }}-win32-x64.zip
+          files: dist/win32-x64/*
           generate_release_notes: true
 
   # ── 2. 發佈 npm 套件（Trusted Publisher / OIDC，不需 token）─────────────
@@ -82,6 +94,25 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+
+      - name: 驗證 GitHub Release 附件齊全
+        shell: pwsh
+        run: |
+          $Ver = $env:GITHUB_REF_NAME -replace '^v',''
+          $required = @(
+            "speakdrill.exe",
+            "speakdrill-gui.exe",
+            "speakdrill-setup-$Ver-win32-x64.exe",
+            "speakdrill-$env:GITHUB_REF_NAME-win32-x64.zip"
+          )
+          $assets = gh release view $env:GITHUB_REF_NAME --json assets --jq '.assets[].name'
+          Write-Output "Release assets:`n$assets"
+          foreach ($r in $required) {
+            if ($assets -notcontains $r) {
+              throw "Release $env:GITHUB_REF_NAME 缺少附件 $r"
+            }
+          }
+          Write-Output "附件驗證通過：$($required -join ', ')"
 
       - name: Ensure npm >= 11.5.1
         run: npm install -g npm@11

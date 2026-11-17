@@ -3024,7 +3024,7 @@ dependencies = [
 
 [[package]]
 name = "speakdrill-cli"
-version = "0.2.46"
+version = "0.2.47"
 dependencies = [
  "anyhow",
  "clap",
@@ -3041,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "speakdrill-core"
-version = "0.2.46"
+version = "0.2.47"
 dependencies = [
  "anyhow",
  "cpal",
@@ -3059,7 +3059,7 @@ dependencies = [
 
 [[package]]
 name = "speakdrill-gui"
-version = "0.2.46"
+version = "0.2.47"
 dependencies = [
  "anyhow",
  "eframe",
