@@ -8,9 +8,9 @@ use crossterm::{
 };
 
 use speakdrill_core::{
-    AudioPlayer, Cdp, Config, LessonRef, LessonReport, LineScore,
-    Progress, RunOptions, SilentProgress, Vm, fetch_myet_stats, run_lesson,
-    save_report, totals_get, version_gt,
+    AudioPlayer, Cdp, LessonRef, LessonReport, LineScore,
+    Progress, RunOptions, Vm, run_lesson,
+    save_report, version_gt,
 };
 use std::process::Command;
 use tokio::time::Duration as TokioDuration;
@@ -272,22 +272,19 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
     });
 
     // 背景檢查新版本（每次啟動時檢查一次，避免頻繁請求）
+    // 背景檢查新版本（每次啟動時檢查一次；向 npm registry 詢問，以背景訊息提示）
     let tx_version = tx.clone();
     rt.spawn(async move {
         tokio::time::sleep(TokioDuration::from_secs(3)).await; // 等 UI 先顯示
-        let current = env!("CARGO_PKG_VERSION");
-        let client = reqwest::Client::new();
-        let url = "https://api.github.com/repos/thumb2086/speakdrill/releases/latest";
         if let Ok(resp) = reqwest::Client::new()
-            .get("https://api.github.com/repos/thumb2086/speakdrill/releases/latest")
+            .get("https://registry.npmjs.org/speakdrill/latest")
             .header("User-Agent", "speakdrill")
-            .header("Accept", "application/vnd.github.v3+json")
+            .header("Accept", "application/vnd.npm.install-v1+json")
             .send()
             .await
         {
             if let Ok(release) = resp.json::<serde_json::Value>().await {
-                if let Some(tag) = release["tag_name"].as_str() {
-                    let latest = tag.trim_start_matches('v');
+                if let Some(latest) = release["version"].as_str() {
                     if version_gt(latest, env!("CARGO_PKG_VERSION")) {
                         let _ = tx_version.send(Ev::Log(format!(
                             "🔔 發現新版本 v{}（目前 v{}），執行 `speakdrill self-update` 可一鍵更新",

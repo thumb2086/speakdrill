@@ -1,7 +1,10 @@
-# speakdrill
+﻿# speakdrill
 
 > 口說課程自動化練習工具：用 TTS 產生示範語音、逐句驅動課程演練、輸出可追蹤的分數報告。
-> **Rust** 實作，同時提供 CLI、TUI 與原生 GUI（egui，**不是** Electron / Tauri webview）。
+
+> **speakdrill 僅支援 Windows（x64）**：用 VB-CABLE 或 VoiceMeeter 虛擬音效迴路把 TTS 變成麥克風輸入。
+> **macOS / Linux 不支援**：VB-CABLE 及 per-app 麥克風綁定（Windows Audio 架構）無法在 macOS/Linux 等同運作。
+> **npm 套件只提供 TUI（終端機介面）**；GUI 原生應用仍在 GitHub Releases 發佈但**不在 npm 安裝流程中**。
 
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -209,10 +212,10 @@ speakdrill setup --force             # 即使已綁定也重設
 speakdrill setup --restart-settings  # 「設定」視窗卡死時，先關閉再重開並自動設定
 ```
 
-GUI 的頂端也有「🔧 自動設定音訊」按鈕與「▶ 跑佇列（N）」按鈕，呼叫同一段程式；「🚀 啟動 MyET」按鈕則以 `--remote-debugging-port=9222 --remote-allow-origins=*` 啟動 MyET10（已在執行就不重搶）；左側課程清單有核取方塊可勾選加入佇列。
+GUI 原生應用已調整為**不在 npm 套件內**；若要使用 GUI，請至 GitHub Releases 下載 `speakdrill-gui.exe`。
 終端機介面（TUI）：`Space` 勾/取消課本（黃色 ●）、`i` 顯示課本的課程列表（單元名 + 課號，一眼對照）、`Enter` 執行（有佇列跑佇列，沒有就跑選取；已完成的課自動略過）、`a` 全選/取消、`x` 清空佇列、`b` 或 `B` 跑全部、`r` 重新載入目錄、`m` 自動啟動 MyET、`s` 請求中止、`PgUp`/`PgDn` 捲動紀錄、`Home` 跳到最早、`End` 回到最新、`q`/`Esc`/`Ctrl+C` 離開。
 
-**跑到一半想加課本**：批次執行中按 `Space` 勾選新課本，本批課程跑完後會自動接續跑這些課本（左側面板標題會顯示「追加 N 本·本批結束後接著跑」）；按 `s` 中止時追加的課本不會自動開始，可按 `Enter` 手動開始，或 `x` 清空。GUI 同樣支援：執行中勾選課本即可，本批結束後自動追加。
+**跑到一半想加課本**：批次執行中按 `Space` 勾選新課本，本批課程跑完後會留在佇列等你按 `Enter` 開始（左側面板標題顯示「追加 N 本」與面板上課本顯示 [1] [2] 的順序）；按 `s` 中止時附加的課本不會自動開始，可按 `Enter` 手動開始，或 `x` 清空。
 注意：**目標 App 必須啟動過且用過麥克風**（Windows mixer 只列有 audio session 的 App）。
 手動 fallback：`ms-settings:apps-volume` → 找到目標 App（MyET 會顯示為 **English-Chinese-Japanese**）→ 展開 → 輸入裝置 → `CABLE Output (VB-Audio Virtual Cable)`。
 
@@ -231,7 +234,6 @@ TUI 啟動時會自動檢查 port 9222，沒連上就自動啟動 MyET（帶 `--
 
 ```bash
 speakdrill                      # 終端機介面（預設；課程列表 + 即時分數）
-speakdrill-gui                  # 原生 GUI
 
 speakdrill list                 # 列出目錄課程（名稱 + 代碼 + 已練分數）
 speakdrill list --refresh       # 忽略快取重抓（目錄快取 10 分鐘；抓到的 0 個有成績時不會覆蓋舊快取）
@@ -246,6 +248,7 @@ speakdrill reset                  # 停止把 TTS 送到 B1，並提示如何還
 speakdrill reset --yes            # 連設定檔一起刪
 
 speakdrill update                 # 檢查 npm 上的最新版，顯示更新指令（npm 不自動跑）
+speakdrill self-update            # 以 npm 自動升級到最新版（背景執行，幾秒後請重開）
 ```
 
 輸出：

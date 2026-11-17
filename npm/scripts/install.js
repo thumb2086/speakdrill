@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * speakdrill 安裝程式：從 GitHub Releases 下載原生二進位，並驗證可執行。
+ * speakdrill 安裝程式：從 GitHub Releases 下載 TUI 原生二進位（GUI 暫不提供 npm 安裝）
  *
  * 環境變數：
  *   SPEAKDRILL_SKIP_DOWNLOAD=1   跳過下載（開發 / 用 target/ 直接跑）
@@ -26,7 +26,7 @@ if (process.platform !== 'win32') {
   process.exit(0);
 }
 
-const exes = ['speakdrill.exe', 'speakdrill-gui.exe'];
+const exes = ['speakdrill.exe'];
 const dir = process.platform === 'win32' ? 'win32-x64' : 'win32-x64';
 const outDir = path.join(__dirname, '..', 'bin', 'binaries', dir);
 
@@ -106,7 +106,7 @@ function unblock(target) {
     console.error(`[speakdrill] 安裝失敗：${e.message}`);
     console.error('[speakdrill] 請改用手動安裝：');
     console.error(`  https://github.com/${REPO}/releases/download/${tag}/${asset}`);
-    console.error('  下載後解壓縮，對 speakdrill.exe / speakdrill-gui.exe 執行：');
+    console.error('  下載後解壓縮，對 speakdrill.exe 執行：');
     console.error('  右鍵 → 內容 → 勾選「解除封鎖」；或 powershell 執行 Unblock-File -Path <路徑>');
     process.exit(1);
   }

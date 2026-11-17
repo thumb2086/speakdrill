@@ -362,129 +362,80 @@ async fn cmd_update() -> Result<()> {
     Ok(())
 }
 
-/// `speakdrill self-update`：自動下載並安裝最新版
-/// 優先使用 Inno Setup 安裝程式（speakdrill-setup-*.exe，會關閉 app、裝好覆蓋舊版）
-/// 沒有 setup 程式時退回 zip（解壓覆蓋安裝目錄裡的舊 exe，需先關閉 speakdrill）
+/// `speakdrill self-update`：查 npm registry 最新版並以 npm 安裝（仿 OpenCode 的 upgrade，但你只有 npm 一條路徑）
+/// 執行中的 exe 不能被覆蓋（Windows），因此以背景程序叫 npm 安裝，本程序先結束後 npm 可覆寫。
 async fn cmd_self_update() -> Result<()> {
     let current = env!("CARGO_PKG_VERSION");
     println!("目前版本：v{current}");
 
-    // 從 GitHub Releases API 取得最新版本資訊
-    let client = reqwest::Client::new();
-    let url = "https://api.github.com/repos/thumb2086/speakdrill/releases/latest";
-    let resp = client
-        .get(url)
-        .header("User-Agent", "speakdrill")
-        .header("Accept", "application/vnd.github.v3+json")
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        println!("⚠ 無法取得 GitHub Releases 資訊");
-        println!("請手動從 https://github.com/thumb2086/speakdrill/releases 下載最新版");
+    // 只有經由 npm 安裝的才叫 npm 升級；直接下載 zip 安裝的人請自行更新
+    let exe = std::env::current_exe()
+        .ok()
+        .map(|p| p.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let is_npm_install = exe.contains("node_modules\\speakdrill") || exe.contains("appdata\\roaming\\npm");
+    if !is_npm_install {
+        println!("這個 speakdrill 不是經由 npm 安裝的，self-update 只支援 npm 安裝環境。");
+        println!("手動更新：npm i -g speakdrill@latest");
+        println!("（或從 https://github.com/thumb2086/speakdrill/releases 下載最新版 EXE）");
         return Ok(());
     }
 
-    let release: serde_json::Value = resp.json().await?;
-    let tag_name = release["tag_name"].as_str().unwrap_or("").trim_start_matches('v');
-    let empty_vec = vec![];
-    let assets = release["assets"].as_array().unwrap_or(&empty_vec);
-
-    // 優先找 Inno Setup 安裝程式
-    let setup_asset = assets.iter().find(|a| {
-        let name = a["name"].as_str().unwrap_or("");
-        name.starts_with("speakdrill-setup-") && name.ends_with(".exe")
-    });
-    let zip_asset = assets.iter().find(|a| {
-        a["name"].as_str().unwrap_or("").ends_with(".zip")
-    });
-
-    let latest_version = tag_name;
-    let (download_url, tmp_name, use_installer) = if let Some(a) = setup_asset {
-        (
-            a["browser_download_url"].as_str().unwrap_or("").to_string(),
-            a["name"].as_str().unwrap_or("speakdrill-setup.exe").to_string(),
-            true,
-        )
-    } else if let Some(a) = zip_asset {
-        (
-            a["browser_download_url"].as_str().unwrap_or("").to_string(),
-            a["name"].as_str().unwrap_or("speakdrill.zip").to_string(),
-            false,
-        )
-    } else {
-        println!("⚠ 找不到可下載的發佈檔（setup exe / zip）");
-        println!("請手動從 https://github.com/thumb2086/speakdrill/releases 下載最新版");
+    // 查 npm registry 最新版本
+    let client = reqwest::Client::new();
+    let resp = client
+        .get("https://registry.npmjs.org/speakdrill/latest")
+        .header("User-Agent", "speakdrill")
+        .header("Accept", "application/vnd.npm.install-v1+json")
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        println!("⚠ 無法取得 npm registry 資訊");
+        println!("手動更新：npm i -g speakdrill@latest");
         return Ok(());
-    };
+    }
+    let release: serde_json::Value = resp.json().await?;
+    let latest = release["version"].as_str().unwrap_or("");
+    if latest.is_empty() {
+        println!("⚠ 解析不到最新版本");
+        println!("手動更新：npm i -g speakdrill@latest");
+        return Ok(());
+    }
 
-    if !version_gt(latest_version, env!("CARGO_PKG_VERSION")) {
+    if !version_gt(latest, current) {
         println!("✓ 已是最新版 (v{current})");
         return Ok(());
     }
 
-    println!("發現新版本：v{latest_version}");
-    println!("下載中...");
+    println!("發現新版本：v{latest}");
+    println!("將叫 npm 在背景安裝最新版（安裝完請重新開啟 speakdrill）…");
+    println!("實際做的事：npm i -g speakdrill@latest");
 
-    let tmp_dir = std::env::temp_dir().join("speakdrill-update");
-    std::fs::create_dir_all(&tmp_dir)?;
-    let tmp_path = tmp_dir.join(&tmp_name);
-
-    let mut resp = client.get(&download_url).send().await?;
-    let mut file = std::fs::File::create(&tmp_path)?;
-    let mut stream = resp.bytes_stream();
-    use futures_util::StreamExt;
-    while let Some(chunk) = stream.next().await {
-        use std::io::Write;
-        file.write_all(&chunk?)?;
+    let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        std::process::Command::new(npm)
+            .args(["i", "-g", "speakdrill@latest"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(DETACHED_PROCESS)
+            .spawn()?;
     }
-    println!("✓ 下載完成：{}", tmp_path.display());
-
-    if use_installer {
-        // Inno Setup 安裝程式會自動關閉正在執行的 speakdrill、覆蓋安裝
-        println!("安裝中（Inno Setup 會關閉 app 並覆蓋舊版，請稍候）...");
-        let status = std::process::Command::new(&tmp_path)
-            .arg("/VERYSILENT")
-            .arg("/CLOSEAPPLICATIONS")
-            .arg("/NORESTART")
-            .status()?;
-
-        if status.success() {
-            println!("✓ 安裝完成！請重新開啟 speakdrill");
-        } else {
-            println!("⚠ 安裝程式回傳非零（{status}），請手動執行：{}", tmp_path.display());
-        }
-    } else {
-        // zip：需要先解壓再覆蓋安裝目錄
-        println!("解壓縮中...");
-        let extract_dir = tmp_dir.join("extracted");
-        let extract_str = extract_dir.to_string_lossy().to_string();
-        let zip_str = tmp_path.to_string_lossy().to_string();
-        let status = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command",
-                &format!("Expand-Archive -Path '{}' -DestinationPath '{}' -Force", zip_str, extract_str)])
-            .status()?;
-        if !status.success() {
-            println!("⚠ 解壓失敗，請手動從 https://github.com/thumb2086/speakdrill/releases 下載最新版");
-            return Ok(());
-        }
-        // 找安裝目錄（目前程式所在位置）
-        let exe_path = std::env::current_exe()?;
-        let install_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
-        // 覆蓋可執行檔（正在執行的 exe 會鎖住，覆蓋會失敗）
-        for name in ["speakdrill.exe", "speakdrill-gui.exe"] {
-            let src = extract_dir.join(name);
-            let dst = install_dir.join(name);
-            if src.exists() {
-                match std::fs::copy(&src, &dst) {
-                    Ok(_) => println!("✓ 已更新 {}", dst.display()),
-                    Err(e) => println!("⚠ 無法覆蓋 {}（{e}）：請先關閉 speakdrill，或以管理員執行", dst.display()),
-                }
-            }
-        }
-        println!("✓ 更新完成（如上方有警告，請關閉 speakdrill 後重開）");
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new(npm)
+            .args(["i", "-g", "speakdrill@latest"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
     }
 
+    println!("✓ 升級已在背景啟動");
+    println!("請等幾秒讓 npm 完成安裝，然後重新開啟 speakdrill。");
     Ok(())
 }
 

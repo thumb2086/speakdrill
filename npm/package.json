@@ -1,7 +1,7 @@
 {
   "name": "speakdrill",
-  "version": "0.2.55",
-  "description": "口說課程自動化練習：TTS 產生示範語音、逐句驅動課程演練、輸出分數報告（Rust，含 TUI / 原生 GUI）",
+  "version": "0.2.56",
+  "description": "MyET 口說課程自動化練習：TTS 驅動、逐句跟讀演練、輸出分數報告（Windows，TUI 版；僅支援虛擬音效迴路環境）",
   "keywords": [
     "speaking",
     "shadowing",
@@ -12,7 +12,6 @@
     "english",
     "cli",
     "tui",
-    "gui",
     "windows"
   ],
   "license": "MIT",
@@ -22,12 +21,10 @@
   },
   "homepage": "https://github.com/thumb2086/speakdrill#readme",
   "bin": {
-    "speakdrill": "bin/speakdrill.js",
-    "speakdrill-gui": "bin/speakdrill-gui.js"
+    "speakdrill": "bin/speakdrill.js"
   },
   "files": [
     "bin/speakdrill.js",
-    "bin/speakdrill-gui.js",
     "scripts/",
     "README.md",
     "LICENSE"

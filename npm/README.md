@@ -26,7 +26,10 @@ speakdrill init
 speakdrill doctor
 ```
 
-安裝時會從 GitHub Releases 下載原生二進位（`speakdrill.exe` / `speakdrill-gui.exe`）。
+安裝時會從 GitHub Releases 下載原生 **TUI** 二進位（`speakdrill.exe`）。**GUI 暫不包含在 npm 套件內**，若需要原生 GUI，請至 GitHub Releases 下載：https://github.com/thumb2086/speakdrill/releases
+
+> **僅支援 Windows（x64）**；macOS / Linux 不支援（需 VB-CABLE 等虛擬音訊驅動 + Windows per-app 麥克風綁定）。
+> **macOS 不保證虛擬音訊管線可用**：Mac 上的音效裝置監聽與綁定方式完全不同，本工具不宣稱能在 macOS 正常運作。
 
 ## 使用時你會看到
 
@@ -55,11 +58,11 @@ speakdrill setup                 # 手動重跑/修復 per-app 麥克風綁定�
 speakdrill doctor                # 檢查環境
 speakdrill                       # 終端機介面（預設）
 speakdrill list                  # 列出課程
-speakdrill-gui                   # 原生 GUI
 speakdrill run  --lesson <ID> --course <ID>
 speakdrill batch --code <CODE> --limit 5
 speakdrill reset                 # 還原音訊路由
-speakdrill update                # 檢查 npm 上的最新版＋顯示更新指令（自身不自動安裝）
+speakdrill update                # 檢查 npm 上的最新版＋顯示更新指令
+speakdrill self-update           # 以 npm 自動升級到最新版（背景執行，請等 npm 完成後重新開啟）
 ```
 
 ## 前置需求
