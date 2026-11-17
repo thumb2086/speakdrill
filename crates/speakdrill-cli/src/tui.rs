@@ -258,7 +258,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
                 break;
             }
         }
-        match speakdrill_core::fetch_myet_stats(&cfg.server, cfg.cdp_port).await {
+        match speakdrill_core::fetch_myet_stats(&cfg.server, cfg.cdp_port, true).await {
             Ok(s) => {
                 let _ = tx_stats.send(Ev::Log(format!("MyET 官方累計學習時間：{:.1} 小時", s.hours)));
                 let _ = tx_stats.send(Ev::MyetStats(s));
@@ -385,6 +385,23 @@ fn event_loop(
                         KeyCode::Char('r') if !app.running => {
                             push_log(app, "... 重新載入目錄".into());
                             spawn_catalog(tx.clone(), true);
+                        }
+                        KeyCode::Char('R') if !app.running => {
+                            push_log(app, "... 強制重新整理 MyET 官方時數".into());
+                            let tx_stats = tx.clone();
+                            let cfg = speakdrill_core::Config::load_or_default();
+                            rt.spawn(async move {
+                                match speakdrill_core::fetch_myet_stats(&cfg.server, cfg.cdp_port, true).await {
+                                    Ok(s) => {
+                                        let _ = tx_stats.send(Ev::Log(format!("MyET 官方累計學習時間：{:.1} 小時", s.hours)));
+                                        let _ = tx_stats.send(Ev::MyetStats(s));
+                                    }
+                                    Err(e) => {
+                                        let _ = tx_stats.send(Ev::Log(format!("MyET 累計時數讀取失敗：{e}")));
+                                        let _ = tx_stats.send(Ev::MyetStatsFailed);
+                                    }
+                                }
+                            });
                         }
                         // m 鍵：手動啟動 MyET（含 debug port，只啟動一次）
                         KeyCode::Char('m') if !app.running => {

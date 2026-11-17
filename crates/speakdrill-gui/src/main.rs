@@ -138,7 +138,7 @@ fn load_myet_stats(tx: Sender<Ev>) {
                     break;
                 }
             }
-            match speakdrill_core::fetch_myet_stats(&cfg.server, cfg.cdp_port).await {
+            match speakdrill_core::fetch_myet_stats(&cfg.server, cfg.cdp_port, false).await {
                 Ok(s) => {
                     let _ = tx.send(Ev::Log(format!("MyET 官方累計學習時間：{:.1} 小時", s.hours)));
                     let _ = tx.send(Ev::MyetStats(s));
@@ -642,6 +642,26 @@ impl eframe::App for App {
                 if ui.add_enabled(!self.running, egui::Button::new("🔄 重新載入")).clicked() {
                     push_log(self, "... 重新載入目錄".into());
                     load_catalog(self.tx.clone(), true);
+                }
+                if ui.add_enabled(!self.running, egui::Button::new("🔁 重新整理時數")).clicked() {
+                    push_log(self, "... 強制重新整理 MyET 官方時數".into());
+                    let tx = self.tx.clone();
+                    let cfg = speakdrill_core::Config::load_or_default();
+                    std::thread::spawn(move || {
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        rt.block_on(async move {
+                            match speakdrill_core::fetch_myet_stats(&cfg.server, cfg.cdp_port, true).await {
+                                Ok(s) => {
+                                    let _ = tx.send(Ev::Log(format!("MyET 官方累計學習時間：{:.1} 小時", s.hours)));
+                                    let _ = tx.send(Ev::MyetStats(s));
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(Ev::Log(format!("MyET 累計時數讀取失敗：{e}")));
+                                    let _ = tx.send(Ev::MyetStatsFailed);
+                                }
+                            }
+                        });
+                    });
                 }
                 if ui.add_enabled(!self.running, egui::Button::new("🚀 啟動 MyET")).clicked() {
                     push_log(self, "... 啟動 MyET（debug port 9222）".into());

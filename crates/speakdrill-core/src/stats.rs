@@ -44,7 +44,8 @@ async fn read_stats_dom(cdp: &crate::cdp::Cdp) -> Option<(String, String, String
 }
 
 /// 讀取 MyET 官方累計學習時數；失敗回傳 Err（呼叫端可退回本機累計）
-pub async fn fetch_myet_stats(server: &str, port: u16) -> Result<MyetStats> {
+/// `force_refresh` 為 true 時會強制重新導航並等待資料實際更新
+pub async fn fetch_myet_stats(server: &str, port: u16, force_refresh: bool) -> Result<MyetStats> {
     let host = "127.0.0.1";
     let cdp = crate::cdp::Cdp::connect(host, port).await?;
     let original_url = cdp.target_url.clone();
@@ -55,6 +56,15 @@ pub async fn fetch_myet_stats(server: &str, port: u16) -> Result<MyetStats> {
     // 導航到 Dashboard.aspx（此頁面顯示 累積 時數 / LV / 證書）
     cdp.navigate(&dashboard_url(server)).await?;
 
+    // 如果強制刷新，先記錄目前的 certs/lv 值，等待它們發生變化
+    let (initial_certs, initial_lv) = if force_refresh {
+        read_stats_dom(&cdp).await
+            .map(|v| (v.2.clone(), v.3.clone()))
+            .unwrap_or((String::new(), String::new()))
+    } else {
+        (String::new(), String::new())
+    };
+
     // 輪詢直到 JS 把官方數字填完（placeholder 是：時間 "0.0"、單位"分"、證書空、LV 空）
     let mut dom_val: Option<(String, String, String, String)> = None;
     for _ in 0..40 {
@@ -64,7 +74,15 @@ pub async fn fetch_myet_stats(server: &str, port: u16) -> Result<MyetStats> {
             // 證書/LV 是 placeholder 時為空字串；時間"0.0"+單位"分"無法分辨是否填完，
             // 用「證書與 LV 皆非空」作為填完訊號（真實 0 值也會填成 "0"）
             let filled = !certs.is_empty() && !lv.is_empty() && !learn_time.is_empty();
-            if filled {
+            
+            // 強制刷新模式：需等待 certs 或 lv 發生實際變化
+            let changed = if force_refresh {
+                certs != &initial_certs || lv != &initial_lv
+            } else {
+                true
+            };
+            
+            if filled && changed {
                 dom_val = Some(v);
                 break;
             }
@@ -162,7 +180,7 @@ mod live_tests {
     fn fetch_live() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let cfg = crate::config::Config::load_or_default();
-        let r = rt.block_on(crate::fetch_myet_stats(&cfg.server, cfg.cdp_port));
+        let r = rt.block_on(crate::fetch_myet_stats(&cfg.server, cfg.cdp_port, false));
         eprintln!("[live] result: {:?}", r);
         assert!(r.is_ok());
     }
