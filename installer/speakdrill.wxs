@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <?define ProductVersion = "0.2.42"?>
+  <?define ProductVersion = "0.2.44"?>
   <?define ProductName = "speakdrill"?>
   <?define Manufacturer = "speakdrill contributors"?>
-  <?define UpgradeCode = "PUT-YOUR-UPGRADE-CODE-GUID-HERE"?>
+  <?define UpgradeCode = "33EC23BF-84B1-4558-A058-90A7290237CB"?>
   <?define InstallDir = "speakdrill"?>
 
   <Product Id="*" 

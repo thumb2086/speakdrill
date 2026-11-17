@@ -20,7 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// 一次性設定：偵測裝置、寫設定、自動偵測 VB-CABLE／VoiceMeeter 迴路、拉雙端音量、自動綁 per-app 麥克風
+    /// 一次性設定：偵測裝置、寫設定、安裝 VB-CABLE 虛擬迴路、拉雙端音量、自動綁 per-app 麥克風
     Init {
         #[arg(long)] device: Option<String>,
         #[arg(long)] server: Option<String>,
@@ -234,12 +234,10 @@ async fn cmd_init(
         }
         None => {
             println!("  ⚠ 沒有可用的虛擬音效迴路");
-            println!("  程式需要一個「虛擬音效迴路」把 TTS 播放聲音變成麥克風輸入。");
+            println!("  程式需要一個虛擬音效迴路（VB-CABLE）把 TTS 播放聲音變成麥克風輸入。");
             println!("  Windows 沒有 user-mode 建立麥克風的方法，必須裝虛擬音效驅動。");
             println!();
-            println!("  支援兩種：");
-            println!("    1. VB-CABLE（推薦，1.3 MB，零設定）");
-            println!("    2. VoiceMeeter（Banana / Potato，~30 MB，需自行設定路由）");
+            println!("  VB-CABLE（1.3 MB，零設定，必裝）");
             println!();
             print!("  要現在自動安裝 VB-CABLE 嗎？需要管理員權限（UAC），安裝後必須重開機 [Y/n] ");
             use std::io::{self, Write};
@@ -259,7 +257,7 @@ async fn cmd_init(
                     return Ok(());
                 }
             } else {
-                println!("  已取消。請自行安裝 VB-CABLE 或 VoiceMeeter，裝完重開機後再跑 init");
+                println!("  已取消。請從 https://vb-audio.com/Cable/ 下載並安裝 VB-CABLE，裝完重開機後再跑 init");
                 return Ok(());
             }
         }
@@ -471,6 +469,26 @@ async fn cmd_doctor() -> Result<()> {
     let mut bad = 0;
 
     print!("[CDP] port {} … ", cfg.cdp_port);
+    // MyET 沒開就自動啟動（與 TUI 相同行為），否則永遠噴錯
+    if !Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
+        let myet_path = std::env::var("SPEAKDRILL_MYET_PATH")
+            .unwrap_or_else(|_| r"C:\Program Files (x86)\LLabs\MyET10\MyET10.exe".to_string());
+        if std::path::Path::new(&myet_path).exists() {
+            println!("\n  MyET 未啟動 → 自動啟動中…");
+            let port_str = cfg.cdp_port.to_string();
+            let _ = std::process::Command::new(&myet_path)
+                .args([format!("--remote-debugging-port={}", port_str), "--remote-allow-origins=*".to_string()])
+                .spawn();
+            for _ in 0..30 {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                if Cdp::check_myet_running("127.0.0.1", cfg.cdp_port).await {
+                    break;
+                }
+            }
+        } else {
+            println!("（找不到 MyET 執行檔）");
+        }
+    }
     match Cdp::connect("127.0.0.1", cfg.cdp_port).await {
         Ok(cdp) => {
             println!("OK  ({})", cdp.target_url);
@@ -480,7 +498,12 @@ async fn cmd_doctor() -> Result<()> {
                 Err(e) => { println!("✗ {e}"); bad += 1; }
             }
         }
-        Err(e) => { println!("✗ {e}"); bad += 1; }
+        Err(e) => {
+            println!("✗ MyET 未連上（{e}）");
+            println!("  請先手動打開 MyET，或確認它已用 --remote-debugging-port=9222 啟動");
+            println!("  若已啟動，請確認沒有多個 speakdrill 視窗鎖住 port 9222");
+            bad += 1;
+        }
     }
 
     print!("[迴路] … ");
