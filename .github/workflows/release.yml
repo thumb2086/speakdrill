@@ -82,6 +82,8 @@ jobs:
 
       - name: 驗證 GitHub Release 附件齊全
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $Ver = $env:GITHUB_REF_NAME -replace '^v',''
           $required = @(
