@@ -50,28 +50,13 @@ jobs:
       - name: Build (CLI + GUI)
         run: cargo build --release -p speakdrill-cli -p speakdrill-gui
 
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-
-      - name: Build Inno Setup Installer
-        shell: pwsh
-        run: |
-          $Version = $env:GITHUB_REF_NAME -replace '^v',''
-          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
-          & $iscc /DVersion=$Version installer\speakdrill.iss
-
       - name: Package
         shell: pwsh
         run: |
-          $Version = $env:GITHUB_REF_NAME -replace '^v',''
           $out = "dist/win32-x64"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item "target/release/speakdrill.exe"     "$out/"
           Copy-Item "target/release/speakdrill-gui.exe" "$out/"
-          $setup = Get-ChildItem 'speakdrill-setup-*.exe' | Select-Object -First 1
-          Copy-Item $setup.FullName "$out/speakdrill-setup-$Version-win32-x64.exe"
           Compress-Archive -Path "$out/speakdrill.exe", "$out/speakdrill-gui.exe" `
             -DestinationPath "$out/speakdrill-${{ github.ref_name }}-win32-x64.zip"
 
@@ -102,7 +87,6 @@ jobs:
           $required = @(
             "speakdrill.exe",
             "speakdrill-gui.exe",
-            "speakdrill-setup-$Ver-win32-x64.exe",
             "speakdrill-$env:GITHUB_REF_NAME-win32-x64.zip"
           )
           $assets = gh release view $env:GITHUB_REF_NAME --json assets --jq '.assets[].name'
