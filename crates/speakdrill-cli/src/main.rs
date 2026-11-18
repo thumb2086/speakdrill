@@ -641,7 +641,19 @@ async fn cmd_doctor() -> Result<()> {
     match &cfg.tts.engine {
         speakdrill_core::TtsEngine::Piper { exe, model } => {
             if std::path::Path::new(exe).exists() && std::path::Path::new(model).exists() {
-                println!("piper OK");
+                // 檔案存在不代表能用 —— 聲音檔下載 60 MB 很容易中斷而留下損毀的 onnx，
+                // piper 載入時會整個崩潰且什麼都不印。實際合成一句驗證。
+                let p = speakdrill_core::piper::PiperPaths {
+                    exe: std::path::PathBuf::from(exe),
+                    model: std::path::PathBuf::from(model),
+                };
+                match speakdrill_core::piper::piper_self_test(&p) {
+                    Ok(()) => println!("piper OK（自我測試通過）"),
+                    Err(e) => {
+                        println!("✗ piper 自我測試失敗：{e}");
+                        bad += 1;
+                    }
+                }
             } else {
                 println!("✗ piper 或 model 不存在"); bad += 1;
             }

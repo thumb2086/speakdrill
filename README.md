@@ -313,6 +313,12 @@ v0.2.29 已修：跑課網址改用課程抓取時的 CodeName。升級 `npm i -
 **第一句「Hello?」2 分？**
 超短句容易抓到環境音或沒量到；後續句子通常正常（87～99 分），短句可直接忽略。
 
+**「句子 #N 合成失敗：piper 失敗：」後面一片空白？**
+v0.2.57 以前 piper 載入聲音模型時若直接崩潰（通常是 onnx 下載 60 MB 中途中斷），
+錯誤訊息會全空。v0.2.57 起會顯示 exit code（例如 `piper 失敗（exit 0xC0000409）：無輸出…`），
+且 `speakdrill doctor` 會**實際合成一句話**檢查（不再只檢查檔案存在）。
+解法：刪除 `%APPDATA%\speakdrill\piper` 資料夾後重新 `speakdrill init`。
+
 **MyET 視窗比例變形／超寬？**
 是 MyET（CEF）視窗大小被調壞了，不是本工具造成的。關掉 MyET 重開，或直接最大化即可。
 
@@ -331,6 +337,8 @@ Windows 的每應用程式輸入裝置。只讓 MyET 收到我們播的 TTS，�
 | `doctor` ✗ CDP / 登入 | MyET 沒開，或 debug port 沒帶 | 按 `m`（或 GUI「🚀 啟動 MyET」），或重開 `speakdrill` |
 | 分數全 ✗／MyET 說「太小聲」 | 錄音端（CABLE Output／Voicemeeter Out B1）音量低 | 重跑 `speakdrill init`（v0.2.33 起會拉滿錄音端） |
 | 全部 0%、官方「累計 0.0」 | MyET 剛開機時抓到相容模式的資料 | `speakdrill list --refresh`（v0.2.30 起再現不會覆蓋舊快取） |
+| `句子 #0 合成失敗：piper 失敗（exit 0xC0000409）` | Piper 聲音模型下載中斷／損毀（v0.2.57 前 doctor 只看檔案存在） | 刪除 `%APPDATA%\speakdrill\piper` → 重新 `speakdrill init` |
+| 合成失敗，exit code 類似 `0xC0000005` | 防毒軟體擋下 piper.exe 子程序 | Windows 安全中心「保護記錄」加入例外後重試 |
 | 目錄載入「抓不到課程」 | MyET 未登入 | 先登入 MyET（能看到「我的課程」）再 `speakdrill` |
 | npm 安裝 `EBUSY`／`EPERM` | 舊 exe 被鎖住（TUI／MyET 在跑） | 關閉後再 `npm i -g speakdrill@latest` |
 | `doctor` ✗ 迴路打不開／錄音靜音 | 驅動未生效 | 重開機後再 `speakdrill doctor` |

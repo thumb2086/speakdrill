@@ -141,6 +141,7 @@ v0.2.14 的事故就是在第 3 步缺席的情況下發布的。**不准跳過�
 | 6 | 除錯順序：doctor → DEBUG run → 依 [cd]/▶/✗ 定位層次 → 修 → 重跑驗收 |
 | 7 | commit message 暫存檔寫到 `.thumb-work\`，`git add` 用明確路徑不用 `-A` |
 | 11 | MyET「學習時間」只顯示 client 端讀到的值，不是 actual practice（被 idle 灌多）；不要用顯示/驗收代替實際單課測試 |
+| 12 | 外部工具（piper）崩潰時 `stdout/stderr` 常全空 + 非 0 exit（如 `0xC0000409`）：一定要把 exit code 帶回錯誤訊息，且「doctor 只檢查檔案存在」診斷不出壞模型 —— 自我測試（實際跑一次）才抓得到 |
 
 ---
 
@@ -200,3 +201,36 @@ v0.2.14 的事故就是在第 3 步缺席的情況下發布的。**不准跳過�
 **教訓**：
 1. 使用者提到的「bug」有時是機制不是失誤 — 你必須先逆向搞懂再判定是不是要改
 2. CDP Network 不見得就看出來 — 會有靜態結果只在 reload/restart 時反映，不一定是即時更新
+
+---
+
+## 12. Piper 崩潰全空訊息（v0.2.57 修正）
+
+**症狀**：使用者的裝置（非開發機）每課第一句合成失敗：`句子 #0 合成失敗：piper 失敗：` —— 冒號後面一片空白。
+
+**根因**（兩層）：
+
+1. speakdrill 呼叫 piper 時把 `stdout` 設為 `Stdio::null()`，崩潰時什麼都不印的 piper 留給我們空的 `stderr`，而我們又沒把 exit code 帶進錯誤訊息 → 訊息全空。
+2. 使用者端的真正問題：Piper 聲音模型 `en_US-lessac-medium.onnx`（約 63 MB）下載不完整／損毀。以截斷 2 MB 的模型實測，piper 會以 `0xC0000409`（STATUS_STACK_BUFFER_OVERRUN / FAST_FAIL）崩潰，stdout 與 stderr 皆空、不產生 wav —— 與截圖完全一致。
+3. 加重因素：`curl` 只檢查檔案 ≥ 1 KB；`doctor` 只檢查檔案存在 → 壞模型全程沒被發現。
+
+**修正（v0.2.57）**：
+
+- `tts.rs`：`stdout` 改為 pipe 捕捉，失敗訊息包含 **exit code（含 0xXXXXXXXX）+ stdout + stderr**（截斷 400 字）。
+- `piper.rs`：新增 `piper_self_test()` — 實際合成「Hello.」，fresh install 與既有安裝都會過（約 1 秒）。
+- `doctor`：TTS 檢查改為真的合成一句，不再只看 `exists()`。
+- 新增 `#[ignore]` 測試 `piper::tests::corrupt_model_reports_exit_code`（需本機已安裝 piper）記錄此事故。
+
+**損毀模型的標準症狀對照**：
+
+| exit code | 常見原因 |
+|---|---|
+| `0xC0000409` | 模型 onnx 損毀／不完整（本機截斷 2 MB 實測重現） |
+| `0xC0000005` | 防毒軟體擋下 piper.exe 子程序 |
+| 啟動失敗（spawn 錯） | 執行檔不存在／架構不符／DLL 缺失 |
+
+**教訓**：
+
+1. 呼叫外部工具一定要把 exit code 帶進錯誤訊息 —— 「什麼都沒印」是崩潰行為不是訊息內容。
+2. 任何「檔案存在 = 正常」的假設都是錯的，尤其下載的大型資源：自我測試（真的用一次）才準。
+3. 除錯順序遇到「錯誤訊息空白」：先找到工具的 stdout/stderr 實際去向（null？pipe？），再查工具自己的行為。

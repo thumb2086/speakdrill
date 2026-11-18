@@ -47,7 +47,7 @@ impl TtsConfig {
                     .arg("--length_scale")
                     .arg(self.length_scale.to_string())
                     .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::piped())
                     .spawn()
                     .with_context(|| format!("啟動 piper 失敗（{exe}）"))?;
@@ -59,10 +59,28 @@ impl TtsConfig {
                 }
                 let out_res = child.wait_with_output()?;
                 if !out_res.status.success() {
-                    return Err(anyhow!(
-                        "piper 失敗：{}",
-                        String::from_utf8_lossy(&out_res.stderr).trim()
-                    ));
+                    // 常見事故（模型下載不完整 / 相依 DLL 被防毒擋下）下，piper 會直接
+                    // 以非 0 exit 結束且什麼都不印 —— 一定要把 exit code 與兩個輸出
+                    // 都帶回去，否則使用者只看到「piper 失敗：」後面空白。
+                    let code = out_res.status.code();
+                    let hex = code.map(|c| format!("0x{:08X}", c as u32)).unwrap_or_else(|| "被終止".to_string());
+                    let stderr = String::from_utf8_lossy(&out_res.stderr);
+                    let stdout = String::from_utf8_lossy(&out_res.stdout);
+                    let mut detail: Vec<&str> = Vec::new();
+                    for part in [stderr.trim(), stdout.trim()] {
+                        if !part.is_empty() {
+                            detail.push(part);
+                        }
+                    }
+                    let mut detail = detail.join(" | ");
+                    if detail.chars().count() > 400 {
+                        detail = detail.chars().take(400).collect::<String>() + "…";
+                    }
+                    return Err(if detail.is_empty() {
+                        anyhow!("piper 失敗（exit {hex}）：無輸出，執行檔或模型可能損毀 / 被防毒擋下，請執行 speakdrill doctor 檢查 TTS")
+                    } else {
+                        anyhow!("piper 失敗（exit {hex}）：{detail}")
+                    });
                 }
             }
             TtsEngine::Command { template } => {
