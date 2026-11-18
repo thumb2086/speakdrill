@@ -1,5 +1,9 @@
 name: release
 
+# 發佈通道：
+#   tag 不帶連字號（例如 v0.2.60）→ GitHub Release（正式）+ npm dist-tag latest
+#   tag 帶連字號（例如 v0.2.60-beta.1）→ GitHub Pre-release + npm dist-tag beta（npm i -g speakdrill@beta 才會裝到）
+
 on:
   push:
     tags: ["v*"]
@@ -40,6 +44,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Tag 類型判定
+        id: rel
+        shell: pwsh
+        run: |
+          $pre = [bool]($env:GITHUB_REF_NAME -match '-')
+          Write-Output "tag=$env:GITHUB_REF_NAME is_pre=$pre"
+          "is_pre=$($pre.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -67,6 +79,7 @@ jobs:
         with:
           files: dist/win32-x64/*
           generate_release_notes: true
+          prerelease: ${{ steps.rel.outputs.is_pre == 'true' }}
 
   # ── 2. 發佈 npm 套件（Trusted Publisher / OIDC，不需 token）─────────────
   npm:
@@ -75,6 +88,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
+      - name: Tag 類型判定
+        id: rel
+        shell: pwsh
+        run: |
+          $pre = [bool]($env:GITHUB_REF_NAME -match '-')
+          Write-Output "tag=$env:GITHUB_REF_NAME is_pre=$pre"
+          "is_pre=$($pre.ToString().ToLower())" >> $env:GITHUB_OUTPUT
 
       - uses: actions/setup-node@v7
         with:
@@ -120,5 +141,13 @@ jobs:
 
       - name: Publish
         working-directory: npm
-        run: npm publish --access public
+        shell: pwsh
+        run: |
+          $pre = [bool]($env:GITHUB_REF_NAME -match '-')
+          if ($pre) {
+            # 測試版不污染 latest；使用者明確要測試才裝：npm i -g speakdrill@beta
+            npm publish --access public --tag beta
+          } else {
+            npm publish --access public
+          }
         # 完全不用設 NODE_AUTH_TOKEN，npm 會自動走 OIDC
