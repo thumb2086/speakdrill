@@ -3,10 +3,17 @@ name: release
 # 發佈通道：
 #   tag 不帶連字號（例如 v0.2.60）→ GitHub Release（正式）+ npm dist-tag latest
 #   tag 帶連字號（例如 v0.2.60-beta.1）→ GitHub Pre-release + npm dist-tag beta（npm i -g speakdrill@beta 才會裝到）
+#
+# 快取策略（v0.2.60-beta.3 更正）：
+#   GitHub 官方文件：workflow 只能還原「同 branch」或「default branch」的 cache；
+#   tag ref 之間完全不共享（"Cannot restore caches created for different tag names"）。
+#   所以 build 也跑 master push — 只為保存共用的 target cache（不發佈任何東西）；
+#   tag 觸發的 job 會還原 master 的 cache → 不再每次全量重編。
 
 on:
   push:
     tags: ["v*"]
+    branches: [master]
 
 # npm Trusted Publisher（OIDC）需要 id-token: write
 permissions:
@@ -25,6 +32,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 核對 tag / Cargo.toml / package.json 版本一致
+        if: github.ref_type == 'tag'
         shell: pwsh
         run: |
           $tag = $env:GITHUB_REF_NAME -replace '^v',''
@@ -35,6 +43,12 @@ jobs:
           if ($pkg.version -ne $ws) { throw "npm/package.json ($($pkg.version)) 與 Cargo.toml ($ws) 不一致" }
           if ($tag -ne $ws) { throw "tag ($tag) 與 Cargo.toml / npm/package.json ($ws) 不一致；請先 bump 版本再打 tag" }
           Write-Output "Version OK: $ws"
+
+      - name: 非 tag（master push）— 只養 cache，不釋出
+        if: github.ref_type != 'tag'
+        shell: pwsh
+        run: Write-Output "ref_type=$env:GITHUB_REF_TYPE — master push：只 build 養 cache，不驗證版本、不打 tag、不發佈。"
+
 
   # ── 1. 在 Windows 上編譯（CLI + GUI），EXEs 與 zip 直接上傳到 Releases ─────────────
   build:
@@ -59,14 +73,18 @@ jobs:
           # 固定 shared-key；並且不要把 Cargo.lock / Cargo.toml 的內容 hash 放進 key —
           # 每次版本 bump 內容都變 → key 就變 → tag 發布永遠 miss（實測 "No cache found."）。
           # 依賴檔 fingerprinting 仍由 Cargo 決定，stale cache 不影響正確性。
+          # save-if 只在 master push 寫入（master 的 cache 所有 ref 都還原得到；tag ref 之間不共享 cache，
+          # 所以 tag 發布的 build 靠還原 master 的 cache — 這次的 release 會實測能否命中）。
           shared-key: speakdrill-release
           cache-on-failure: true
           add-rust-environment-hash-key: false
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Build (CLI + GUI)
         run: cargo build --release -p speakdrill-cli -p speakdrill-gui
 
       - name: Package
+        if: github.ref_type == 'tag'
         shell: pwsh
         run: |
           $out = "dist/win32-x64"
@@ -77,6 +95,7 @@ jobs:
             -DestinationPath "$out/speakdrill-${{ github.ref_name }}-win32-x64.zip"
 
       - name: Release
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/win32-x64/*
@@ -85,6 +104,7 @@ jobs:
 
   # ── 2. 發佈 npm 套件（Trusted Publisher / OIDC，不需 token）─────────────
   npm:
+    if: github.ref_type == 'tag'
     needs: [verify, build]
     runs-on: windows-latest
     timeout-minutes: 10
