@@ -26,6 +26,8 @@ enum Ev {
     SetupDone,
     /// 偵測到 npm 上有新版（背景檢查，失敗靜默）
     NewVersion(String),
+    /// 目前正在跑的課（由 run 迴圈送出，用來標示側欄上的課本）
+    LessonStart(String),
     /// TTS 自測完成（用來解除按鈕的 busy 狀態）
     TtsTestDone,
     Fatal(String),
@@ -89,6 +91,8 @@ struct App {
     tts_busy: bool,
     /// 背景檢查發現的較新版本（npm latest）
     new_version: Option<String>,
+    /// 目前正在跑的課號（側欄用來標出正在跑的課本）
+    running_lesson: Option<String>,
 }
 
 impl App {
@@ -130,6 +134,7 @@ impl App {
             vb_cable: speakdrill_core::devices::has_vb_cable(),
             tts_busy: false,
             new_version: None,
+            running_lesson: None,
         };
         load_catalog(tx.clone(), false);
         load_myet_stats(tx.clone());
@@ -326,6 +331,28 @@ fn check_new_version(tx: Sender<Ev>) {
     });
 }
 
+/// 從 "標題（課號）"（全形括號，lesson_label 的格式）取出課號
+fn extract_lesson_id(s: &str) -> Option<String> {
+    match s.rfind('（') {
+        Some(open) => {
+            let id = s[open + '（'.len_utf8()..].trim_end_matches('）').trim();
+            if id.is_empty() {
+                None
+            } else {
+                Some(id.to_string())
+            }
+        }
+        None => {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        }
+    }
+}
+
 fn start_tts_test(tx: Sender<Ev>) {
     std::thread::spawn(move || {
         let tx_log = tx.clone();
@@ -456,7 +483,7 @@ fn start_run(tx: Sender<Ev>, stop: Arc<AtomicBool>, lessons: Vec<LessonRef>, pas
                 let course_id = l.course_id.clone();
                 let code = l.code.clone();
                 let contype = l.contype.clone();
-                let _ = tx.send(Ev::Log(format!("▶ {}", lesson_label(&lesson_id, &l.title))));
+                let _ = tx.send(Ev::LessonStart(lesson_label(&lesson_id, &l.title)));
                 let mut p = ChannelProgress {
                     tx: tx.clone(),
                     stop: stop.clone(),
@@ -564,8 +591,15 @@ impl eframe::App for App {
                     self.avg_sum += s.total as f64;
                     self.avg_n += 1;
                 }
+                Ev::LessonStart(l) => {
+                    self.running_lesson = extract_lesson_id(&l);
+                    push_log(self, format!("▶ {l}"));
+                }
                 Ev::LessonDone(r) => {
                     self.completed.insert(r.lesson_id.clone());
+                    if self.running_lesson.as_deref() == Some(r.lesson_id.as_str()) {
+                        self.running_lesson = None;
+                    }
                     self.total_secs += r.elapsed_secs;
                     push_log(
                         self,
@@ -577,6 +611,7 @@ impl eframe::App for App {
                 }
                 Ev::Done => {
                     self.running = false;
+                    self.running_lesson = None;
                     let avg = if self.avg_n > 0 {
                         self.avg_sum / self.avg_n as f64
                     } else {
@@ -610,6 +645,7 @@ impl eframe::App for App {
                 }
                 Ev::Fatal(e) => {
                     self.running = false;
+                    self.running_lesson = None;
                     self.status = e.clone();
                     push_log(self, format!("✗ {e}"));
                 }
@@ -770,6 +806,15 @@ impl eframe::App for App {
             .resizable(true)
             .default_width(360.0)
             .show(ctx, |ui| {
+                // 佇列的實際待跑課數（展開時合計 376 課、略過已完成後）
+                let pending: usize = self
+                    .queue
+                    .iter()
+                    .filter_map(|&i| self.coursebooks.get(i))
+                    .map(|(_, _, lessons)| {
+                        lessons.iter().filter(|l| !self.completed.contains(&l.lesson_id)).count()
+                    })
+                    .sum();
                 let qlabel = if !self.queue.is_empty() {
                     let order = self
                         .queue
@@ -777,7 +822,7 @@ impl eframe::App for App {
                         .map(|&i| self.coursebooks.get(i).map(|c| c.0.as_str()).unwrap_or("?"))
                         .collect::<Vec<_>>()
                         .join(" → ");
-                    format!("課本 · 佇列 {} 本：{}", self.queue.len(), order)
+                    format!("課本 · 佇列 {} 本（待 {} 課）：{}", self.queue.len(), pending, order)
                 } else if self.running {
                     "課本（執行中 — 勾選即追加，本批結束按「▶ 跑佇列」開始）".to_string()
                 } else {
@@ -791,7 +836,16 @@ impl eframe::App for App {
                         let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u32 } else { 0 };
                         let queued = self.queue.contains(&i);
                         let pos = self.queue.iter().position(|&x| x == i).map(|p| p + 1);
-                        let mark = pos.map(|p| format!("●#{p} ")).unwrap_or_else(|| "    ".to_string());
+                        let is_running = self
+                            .running_lesson
+                            .as_deref()
+                            .map(|id| lessons.iter().any(|l| l.lesson_id == id))
+                            .unwrap_or(false);
+                        let mark = if is_running {
+                            "▶1   ".to_string()
+                        } else {
+                            pos.map(|p| format!("●#{p} ")).unwrap_or_else(|| "    ".to_string())
+                        };
                         let row = format!("{}{}  {}  {}/{} ({}%)", mark, code, name, done, total, pct);
                         ui.horizontal(|ui| {
                             let mut checked = queued;
@@ -804,10 +858,21 @@ impl eframe::App for App {
                                     self.queue.retain(|&x| x != i);
                                 }
                             }
-                            let color = if queued {
+                            let color = if is_running {
+                                // 正在跑：亮青色
+                                egui::Color32::from_rgb(64, 224, 208)
+                            } else if done == total && total > 0 {
+                                // 整本全部完成：綠色
+                                egui::Color32::from_rgb(78, 201, 84)
+                            } else if queued {
+                                // 已加入佇列待跑：黃色
                                 egui::Color32::from_rgb(255, 214, 10)
+                            } else if done == 0 {
+                                // 完全沒跑過：暗灰
+                                egui::Color32::GRAY
                             } else {
-                                ui.style().visuals.text_color()
+                                // 進行中：白色醒目（不再是色點/重點色）
+                                egui::Color32::WHITE
                             };
                             let label = egui::RichText::new(row).color(color).monospace();
                             if ui.selectable_label(i == self.sel, label).clicked() {

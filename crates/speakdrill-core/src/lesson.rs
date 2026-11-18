@@ -356,7 +356,12 @@ pub async fn fetch_lines(cdp: &Cdp, scoring_query: &str) -> Result<Vec<Line>> {
         });
     }
     if lines.is_empty() {
-        return Err(anyhow!("課程 XML 解析不到句子（LessonID 錯或沒登入）"));
+        // LLBS / ETS 類型的課本沒有逐句設計 — 伺服器照常回 200，但 Sentences LineCount="0"，
+        // 或根本沒有 <Line>。跟「真的 LessonID 錯 / 沒登入」完全是兩件事，錯誤訊息必須誠實。
+        if xml.contains("<Sentences") && (xml.contains("LineCount=\"0\"") || xml.contains("Type=\"ETS\"")) {
+            return Err(anyhow!("此課程為測驗型/聽力課程（沒有逐句設計），speakdrill 不支援逐句練習"));
+        }
+        return Err(anyhow!("課程 XML 解析不到句子（LessonID 錯、沒登入或此課程無逐句設計）"));
     }
     lines.sort_by_key(|l| l.index);
     Ok(lines)

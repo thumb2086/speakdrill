@@ -307,6 +307,11 @@ MyET 官方目錄（`CategoryLessonScores.aspx`，含 best_score），不是本�
 MyET 官方值是 JS 非同步填進畫面的，等它填完（通常幾秒）才換成「MyET 累計 X 小時」；
 讀取失敗才退回本機累計（只算本工具跑的課次，會是 0.0）。
 
+**LLBS／ETS 課本（多益攻略）每一課都「測驗型/聽力課程」？**
+這些課本（LLBS-Y4R／CW2／58R／2XO）是多益聽力/測驗題型，XML 裡 `Type="ETS"`、`<Sentences LineCount="0"`，
+**沒有逐句設計**，逐句練習的 scoring 頁根本不存在 — speakdrill 不支援，也不是登入或 LessonID 的問題。
+v0.2.60 起錯誤訊息會直接說明原因。
+
 **選了 B2B，頁面卻顯示「2A」（第一句 2 分）？**
 v0.2.29 已修：跑課網址改用課程抓取時的 CodeName。升級 `npm i -g speakdrill@latest`。
 
