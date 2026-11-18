@@ -46,6 +46,8 @@ jobs:
         with:
           # 固定 shared-key：Cargo.lock 隨版本 bump 而變，預設 key 會讓每次 release 全量重編
           shared-key: speakdrill-release
+          # 即使 build 失敗也寫入快取，讓下次重跑吃到增量編譯
+          cache-on-failure: true
 
       - name: Build (CLI + GUI)
         run: cargo build --release -p speakdrill-cli -p speakdrill-gui
@@ -101,7 +103,15 @@ jobs:
           Write-Output "附件驗證通過：$($required -join ', ')"
 
       - name: Ensure npm >= 11.5.1
-        run: npm install -g npm@11
+        shell: pwsh
+        run: |
+          $v = (npm --version).Trim()
+          if ([version]$v -lt [version]"11.5.1") {
+            Write-Output "npm $v 低於 11.5.1，升級…"
+            npm install -g npm@11
+          } else {
+            Write-Output "npm $v 已符合 >= 11.5.1，略過安裝"
+          }
 
       - name: Show versions
         run: |

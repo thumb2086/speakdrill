@@ -16,6 +16,7 @@ hound.workspace = true
 cpal.workspace = true
 libloading.workspace = true
 dirs.workspace = true
+sha2.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [

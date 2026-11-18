@@ -3,7 +3,7 @@ members = ["crates/speakdrill-core", "crates/speakdrill-cli", "crates/speakdrill
 resolver = "2"
 
 [workspace.package]
-version = "0.2.58"
+version = "0.2.59"
 edition = "2021"
 license = "MIT"
 authors = ["speakdrill contributors"]
@@ -18,6 +18,7 @@ tokio-tungstenite = "0.24"
 futures-util = "0.3"
 regex = "1"
 hound = "3"
+sha2 = "0.10"
 cpal = "0.15"
 libloading = "0.8"
 dirs = "5"
@@ -25,7 +26,6 @@ clap = { version = "4", features = ["derive"] }
 
 [profile.release]
 lto = "thin"
-codegen-units = 1
 strip = true
 opt-level = 3
 

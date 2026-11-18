@@ -142,6 +142,7 @@ v0.2.14 的事故就是在第 3 步缺席的情況下發布的。**不准跳過�
 | 7 | commit message 暫存檔寫到 `.thumb-work\`，`git add` 用明確路徑不用 `-A` |
 | 11 | MyET「學習時間」只顯示 client 端讀到的值，不是 actual practice（被 idle 灌多）；不要用顯示/驗收代替實際單課測試 |
 | 12 | 外部工具（piper）崩潰時 `stdout/stderr` 常全空 + 非 0 exit（如 `0xC0000409`）：一定要把 exit code 帶回錯誤訊息，且「doctor 只檢查檔案存在」診斷不出壞模型 —— 自我測試（實際跑一次）才抓得到 |
+| 13 | 大型下載資源加「大小 + SHA-256 對上游 oid」雙重驗證；對不上就自動重抓 + 刪除壞檔，不準存在 `>=1KB` 的寬鬆檢查把殘缺檔案當成正常 |
 
 ---
 
@@ -234,3 +235,27 @@ v0.2.14 的事故就是在第 3 步缺席的情況下發布的。**不准跳過�
 1. 呼叫外部工具一定要把 exit code 帶進錯誤訊息 —— 「什麼都沒印」是崩潰行為不是訊息內容。
 2. 任何「檔案存在 = 正常」的假設都是錯的，尤其下載的大型資源：自我測試（真的用一次）才準。
 3. 除錯順序遇到「錯誤訊息空白」：先找到工具的 stdout/stderr 實際去向（null？pipe？），再查工具自己的行為。
+
+---
+
+## 13. 用 SHA-256 對上游 oid 驗證模型完整性（v0.2.59）
+
+**症狀**：使用者的 `init` 走完後，執行任何課還是 `piper 失敗（exit 0xC0000409）`。`doctor` 的「全檔案存在」檢查通過，因為 `curl` 只驗 `>= 1024` bytes。
+
+**根因**：63 MB 下載半路中斷 → 殘缺但非零的 onnx 留在磁碟上 → piper 載入時崩潰。
+
+**修正（v0.2.59）**：
+
+- `piper.rs` 新增常數 `MODEL_SHA256` / `MODEL_JSON_SHA256` / `MODEL_SIZE` / `MODEL_JSON_SIZE`（對上 HuggingFace `resolve/v1.0.0` 的 LFS oid，與本機實測可用模型交叉驗證一致）。
+- `model_integrity()`：大小 + SHA-256 雙檢（檔案）；onnx 與 onnx.json 都驗。
+- `download_verified()`：下載即驗，不符就**刪除**並提示重跑 init（避免壞檔案被 `piper_paths()` 誤認為已安裝）。
+- `ensure_piper()`：已安裝的 piper 先驗模型，壞了**自動重抓**，不需要使用者手動刪資料夾；fresh install 也走同一條驗證。
+- 新增 `#[ignore]` 測試 `model_integrity_detects_truncated_model`（健康模型應通過；截斷 2MB 案例應報「大小不符」）。
+
+**加速 CI 的同步動作**：`codegen-units = 1` → 預設 16（thin LTO 保留）；`cache-on-failure: true`；`npm install -g npm@11` 改為只有版本不足才跑。
+
+**教訓**：
+
+1. 下載的模型/資源驗證要綁定到**內容本身（hash + size）**，不要綁定到行為（「檔案在就好」）或粗糙門檻（>= 1KB）。
+2. 驗證標準要取自**上遊的可信聲明（LFS oid/pointer）**，再用本機實測交叉確認，不要自己尻一個 hash。
+3. 自動重抓比要求使用者手動刪檔更少失敗步驟 —— 刪除損毀檔案而非覆蓋到一半。
