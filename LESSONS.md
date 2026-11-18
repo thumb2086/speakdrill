@@ -140,6 +140,7 @@ v0.2.14 的事故就是在第 3 步缺席的情況下發布的。**不准跳過�
 | 5 | 依賴 App 畫面文字的判斷：寬鬆匹配 + 多候選按鈕 + 除錯輸出 |
 | 6 | 除錯順序：doctor → DEBUG run → 依 [cd]/▶/✗ 定位層次 → 修 → 重跑驗收 |
 | 7 | commit message 暫存檔寫到 `.thumb-work\`，`git add` 用明確路徑不用 `-A` |
+| 11 | MyET「學習時間」只顯示 client 端讀到的值，不是 actual practice（被 idle 灌多）；不要用顯示/驗收代替實際單課測試 |
 
 ---
 
@@ -177,3 +178,25 @@ v0.2.14 的事故就是在第 3 步缺席的情況下發布的。**不准跳過�
 1. 凡是「App 畫面上的數字」，先問一句：**這是 SSR 內容還是 JS 填的？** 填的是 → 直接讀元素 id + 輪詢非空，別讀 innerText。
 2. 任何會**毀掉好資料**的覆寫路徑（寫快取/寫設定）都要有保留舊值的保護條件。
 3. `shell.remove_item` 之外，「讀取+寫快取」也是一種破壞性動作，要像對待刪除一樣謹慎。
+
+---
+
+## 11. MyET「學習時間」是空時數膨脹（v0.2.55 觀測）
+
+**症狀**：MyET 顯示的線上累計時間遠大於實際練習時數，例如 12 分鐘沒練的空 Idle 也會 +1.3 小時，只對 `op=GetAccOnlinePeriod` 的後端 Account + Redis 真實累加來自帳號存活時間，與 Path / Lesson 完成紀錄繫不到一起，所以：
+- 它不是「你練了幾小時」
+- 它是「你 session 開過多久」
+- 只收集到不存在的任何對端參數，也沒 client-side heartbeat
+
+**觀測到的資訊**：
+- GET-Hours value 來自 `POST AJaxServices.aspx?op=GetAccOnlinePeriod` → `{"Online": 77217, "Detail": {"value": "21.5", "unit": "時"}}`
+- 過兩次連讀都得到完全一致的值 → 不見任何增量直到 SESSION 關閉/重啟後刷新
+- 沒 client heartbeat（CDP Network 45 秒收集 0 個 XHR）
+- Dashboard 首次載入會打 `SetAccOnlinePeriod()`，資訊跟著 fill
+- 官方 API 回的 `Online` 是精確秒數 ≈ 21.45 小時 × 3600 = 77220 秒（差 < 0.05%）
+
+**目前狀態**：使用者明確表明不處理、顯示不動、display 不改；只確認機制存在並留下記錄。
+
+**教訓**：
+1. 使用者提到的「bug」有時是機制不是失誤 — 你必須先逆向搞懂再判定是不是要改
+2. CDP Network 不見得就看出來 — 會有靜態結果只在 reload/restart 時反映，不一定是即時更新
