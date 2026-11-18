@@ -24,6 +24,8 @@ enum Ev {
     LessonDone(LessonReport),
     Done,
     SetupDone,
+    /// TTS 自測完成（用來解除按鈕的 busy 狀態）
+    TtsTestDone,
     Fatal(String),
 }
 
@@ -79,6 +81,10 @@ struct App {
     books_names: std::collections::HashMap<String, String>,
     pass: u32,
     setup_busy: bool,
+    /// VB-CABLE 是否就緒（啟動時列舉一次音訊裝置並快取；安裝驅動後需重開才會更新）
+    vb_cable: bool,
+    /// TTS 自測按鈕正在執行
+    tts_busy: bool,
 }
 
 impl App {
@@ -116,6 +122,9 @@ impl App {
             books_names: std::collections::HashMap::new(),
             pass: 80,
             setup_busy: false,
+            // 裝置列舉（cpal + COM）每次都要好幾十毫秒，絕不能放進每幀的 update() 迴路裡
+            vb_cable: speakdrill_core::devices::has_vb_cable(),
+            tts_busy: false,
         };
         load_catalog(tx.clone(), false);
         load_myet_stats(tx.clone());
@@ -280,6 +289,29 @@ fn start_myet(tx: Sender<Ev>) {
             }
             let _ = tx.send(Ev::Log("MyET 已啟動，但 CDP 未連上".into()));
         });
+    });
+}
+
+fn start_tts_test(tx: Sender<Ev>) {
+    std::thread::spawn(move || {
+        let tx_log = tx.clone();
+        let _ = tx_log.send(Ev::Log("… TTS 自測（實際合成一句）".into()));
+        match speakdrill_core::piper::piper_paths() {
+            Some(p) => match speakdrill_core::piper::piper_self_test(&p) {
+                Ok(()) => {
+                    let _ = tx_log.send(Ev::Log("✓ TTS 自測成功".into()));
+                }
+                Err(e) => {
+                    let _ = tx_log.send(Ev::Log(format!("✗ TTS 自測失敗：{e}")));
+                }
+            },
+            None => {
+                let _ = tx_log.send(Ev::Log(
+                    "✗ TTS 自測失敗：找不到 piper（請重新執行 speakdrill init 或刪除損毀的 %APPDATA%\\speakdrill\\piper 後重跑）".into(),
+                ));
+            }
+        }
+        let _ = tx.send(Ev::TtsTestDone);
     });
 }
 
@@ -530,6 +562,9 @@ impl eframe::App for App {
                     self.setup_busy = false;
                     self.status = "音訊設定完成（詳見紀錄）".into();
                 }
+                Ev::TtsTestDone => {
+                    self.tts_busy = false;
+                }
                 Ev::Fatal(e) => {
                     self.running = false;
                     self.status = e.clone();
@@ -659,11 +694,18 @@ impl eframe::App for App {
                 if self.setup_busy {
                     ui.spinner();
                 }
+                if ui.add_enabled(!self.tts_busy && !self.running, egui::Button::new("🔊 測試 TTS")).clicked() {
+                    self.tts_busy = true;
+                    start_tts_test(self.tx.clone());
+                }
+                if self.tts_busy {
+                    ui.spinner();
+                }
                 ui.separator();
                 ui.label("及格分");
                 ui.add(egui::Slider::new(&mut self.pass, 50..=100));
                 ui.separator();
-                let vroute = if speakdrill_core::devices::has_vb_cable() {
+                let vroute = if self.vb_cable {
                     "虛擬迴路：VB-CABLE ✓"
                 } else {
                     "虛擬迴路：未偵測（點上方按鈕安裝）"
