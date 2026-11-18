@@ -338,7 +338,8 @@ Windows 的每應用程式輸入裝置。只讓 MyET 收到我們播的 TTS，�
 | `doctor` ✗ CDP / 登入 | MyET 沒開，或 debug port 沒帶 | 按 `m`（或 GUI「🚀 啟動 MyET」），或重開 `speakdrill` |
 | 分數全 ✗／MyET 說「太小聲」 | 錄音端（CABLE Output／Voicemeeter Out B1）音量低 | 重跑 `speakdrill init`（v0.2.33 起會拉滿錄音端） |
 | 全部 0%、官方「累計 0.0」 | MyET 剛開機時抓到相容模式的資料 | `speakdrill list --refresh`（v0.2.30 起再現不會覆蓋舊快取） |
-| `句子 #0 合成失敗：piper 失敗（exit 0xC0000409）` | Piper 聲音模型下載中斷／損毀（v0.2.57 前 doctor 只看檔案存在） | v0.2.59 起跑 `speakdrill init` 會自動驗 SHA-256 並重抓；否則刪除 `%APPDATA%\speakdrill\piper` → 重跑 `init` |
+| `句子 #0 合成失敗：piper 失敗（exit 0xC0000409）` | Piper 聲音模型下載中斷／損毀（v0.2.57 前 doctor 只看檔案存在） | v0.2.59 起 `speakdrill init` 會自動驗 SHA-256 並重抓；否則刪除 `%APPDATA%\speakdrill\piper` → 重跑 `init` |
+| 模型雜湊都正常卻 `exit 0xC0000409`，且**使用者名稱含中文** | **piper 無法載入含非 ASCII 字元的模型路徑**（實測中文資料夾內的 piper 直接 fastfail） | v0.2.60 起自動遷移安裝到 `C:\Users\Public\speakdrill\piper`（純 ASCII）並重寫設定；<br>舊版手動：把 piper 資料夾複製到 ASCII 路徑，改 `config.json` 的 exe/model 絕對路徑 |
 | 合成失敗，exit code 類似 `0xC0000005` | 防毒軟體擋下 piper.exe 子程序 | Windows 安全中心「保護記錄」加入例外後重試 |
 | 目錄載入「抓不到課程」 | MyET 未登入 | 先登入 MyET（能看到「我的課程」）再 `speakdrill` |
 | npm 安裝 `EBUSY`／`EPERM` | 舊 exe 被鎖住（TUI／MyET 在跑） | 關閉後再 `npm i -g speakdrill@latest` |

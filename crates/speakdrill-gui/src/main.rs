@@ -24,6 +24,8 @@ enum Ev {
     LessonDone(LessonReport),
     Done,
     SetupDone,
+    /// 偵測到 npm 上有新版（背景檢查，失敗靜默）
+    NewVersion(String),
     /// TTS 自測完成（用來解除按鈕的 busy 狀態）
     TtsTestDone,
     Fatal(String),
@@ -85,6 +87,8 @@ struct App {
     vb_cable: bool,
     /// TTS 自測按鈕正在執行
     tts_busy: bool,
+    /// 背景檢查發現的較新版本（npm latest）
+    new_version: Option<String>,
 }
 
 impl App {
@@ -125,9 +129,11 @@ impl App {
             // 裝置列舉（cpal + COM）每次都要好幾十毫秒，絕不能放進每幀的 update() 迴路裡
             vb_cable: speakdrill_core::devices::has_vb_cable(),
             tts_busy: false,
+            new_version: None,
         };
         load_catalog(tx.clone(), false);
         load_myet_stats(tx.clone());
+        check_new_version(tx.clone());
         app
     }
 }
@@ -288,6 +294,34 @@ fn start_myet(tx: Sender<Ev>) {
                 }
             }
             let _ = tx.send(Ev::Log("MyET 已啟動，但 CDP 未連上".into()));
+        });
+    });
+}
+
+/// 背景查 npm 上有沒有新版（讀不到就靜默跳過），有的話透過 Ev::NewVersion 通知 GUI
+fn check_new_version(tx: Sender<Ev>) {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            let client = reqwest::Client::new();
+            let resp = client
+                .get("https://registry.npmjs.org/speakdrill/latest")
+                .header("User-Agent", "speakdrill-gui")
+                .header("Accept", "application/vnd.npm.install-v1+json")
+                .send()
+                .await;
+            let Ok(resp) = resp else { return };
+            if !resp.status().is_success() {
+                return;
+            }
+            let Ok(v) = resp.json::<serde_json::Value>().await else { return };
+            let latest = v["version"].as_str().unwrap_or("").trim().to_string();
+            if latest.is_empty() {
+                return;
+            }
+            if speakdrill_core::version_gt(&latest, env!("CARGO_PKG_VERSION")) {
+                let _ = tx.send(Ev::NewVersion(latest));
+            }
         });
     });
 }
@@ -565,6 +599,15 @@ impl eframe::App for App {
                 Ev::TtsTestDone => {
                     self.tts_busy = false;
                 }
+                Ev::NewVersion(v) => {
+                    let current = env!("CARGO_PKG_VERSION").to_string();
+                    self.new_version = Some(v.clone());
+                    push_log(
+                        self,
+                        format!("📦 有新版本 v{v}（目前 v{current}）— 點上方「📦 更新」開啟 GitHub 發佈頁"),
+                    );
+                    self.status = format!("有新版本 v{v} 可下載");
+                }
                 Ev::Fatal(e) => {
                     self.running = false;
                     self.status = e.clone();
@@ -711,6 +754,15 @@ impl eframe::App for App {
                     "虛擬迴路：未偵測（點上方按鈕安裝）"
                 };
                 ui.label(vroute);
+                if let Some(v) = self.new_version.clone() {
+                    ui.separator();
+                    if ui.button(format!("📦 更新 v{v}")).clicked() {
+                        let _ = std::process::Command::new("cmd")
+                            .args(["/C", "start", "", "https://github.com/thumb2086/speakdrill/releases/latest"])
+                            .spawn();
+                        push_log(self, "已開啟 GitHub Releases — 下載 speakdrill-gui.exe 覆蓋舊檔即可".into());
+                    }
+                }
             });
         });
 

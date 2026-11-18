@@ -96,9 +96,34 @@ fn download_model(dir: &std::path::Path, log: &mut dyn FnMut(&str)) -> anyhow::R
     Ok(())
 }
 
-/// 找 piper 安裝位置（`init` 會下載到這裡）
-pub fn piper_paths() -> Option<PiperPaths> {
-    let dir = crate::config::config_dir().join("piper");
+/// 判斷整條路徑是否全為 ASCII 字元。
+/// **piper 無法載入含非 ASCII 字元的路徑**（實測 spawn → 0xC0000409 fastfail，無任何輸出）。
+pub fn any_ascii(s: &str) -> bool {
+    s.chars().all(|c| c.is_ascii())
+}
+
+fn legacy_piper_dir() -> PathBuf {
+    crate::config::config_dir().join("piper")
+}
+
+/// piper 安裝根目錄（PiperPaths 的模型/執行檔都在這）。
+/// 使用者名稱是中文（例如 `C:\Users\還是的\...`）時，既有安裝一定是壞的 —
+/// 尊重既有 ASCII 安裝；否則改用 machine-wide ASCII 位置。
+pub fn piper_root() -> PathBuf {
+    let legacy = legacy_piper_dir();
+    if legacy.exists() && any_ascii(&legacy.to_string_lossy()) {
+        return legacy;
+    }
+    let public = PathBuf::from(r"C:\Users\Public");
+    if public.exists() {
+        return public.join("speakdrill").join("piper");
+    }
+    // 萬一連 Public 都沒有（極少數企業鎖死），退回 config dir — piper 可能還是會崩潰，
+    // 但至少 init 不會直接放棄
+    legacy
+}
+
+fn paths_in(dir: &std::path::Path) -> Option<PiperPaths> {
     let exe = [dir.join("piper").join("piper.exe"), dir.join("piper.exe")]
         .into_iter()
         .find(|p| p.exists())?;
@@ -107,6 +132,51 @@ pub fn piper_paths() -> Option<PiperPaths> {
         return None;
     }
     Some(PiperPaths { exe, model })
+}
+
+/// 遞迴複製資料夾（用來遷移完整的 piper 安裝，避免重抓 63 MB 模型）
+fn copy_dir_recursive(src: &std::path::Path, dest: &std::path::Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let target = dest.join(entry.file_name());
+        let ft = entry.file_type()?;
+        if ft.is_dir() {
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// 既有安裝在非 ASCII 路徑且模型 intact → 複製到 ASCII 路徑。
+/// 只有這種情況才能免重抓；模型壞了還是走下載。
+fn migrate_from_legacy(dir: &std::path::Path, log: &mut dyn FnMut(&str)) -> anyhow::Result<bool> {
+    let legacy = legacy_piper_dir();
+    if !legacy.exists() || any_ascii(&legacy.to_string_lossy()) {
+        return Ok(false);
+    }
+    let Some(p) = paths_in(&legacy) else {
+        log("偵測到非 ASCII 的舊安裝，但 exe/模型殘缺 — 改為重新下載");
+        return Ok(false);
+    };
+    if model_integrity(&p).is_err() {
+        log("舊安裝的模型也損毀 — 改為重新下載");
+        return Ok(false);
+    }
+    log(&format!(
+        "piper 不支援非 ASCII 路徑（{}）— 複製到 ASCII 路徑（{}）…",
+        legacy.display(),
+        dir.display()
+    ));
+    copy_dir_recursive(&legacy, dir)?;
+    Ok(true)
+}
+
+/// 找 piper 安裝位置（`init` 會下載到這裡）
+pub fn piper_paths() -> Option<PiperPaths> {
+    paths_in(&piper_root())
 }
 
 pub struct PiperPaths {
@@ -122,8 +192,9 @@ const VOICE_BASE: &str =
 /// 下載 / 既有的 piper 都會先驗證模型完整性，再跑一次「真的合成一句」——模型下載不完整時
 /// 檔案存在仍會讓 piper 以 0xC0000409 之類的 exit code 自行崩潰，而且什麼都不印。
 pub fn ensure_piper(log: &mut dyn FnMut(&str)) -> anyhow::Result<PiperPaths> {
-    let dir = crate::config::config_dir().join("piper");
+    let dir = piper_root();
 
+    // A. ASCII 位置已有完整安裝 → 驗證完整性 + 自我測試
     if let Some(p) = piper_paths() {
         log("Piper 已安裝，檢查模型完整性…");
         if model_integrity(&p).is_err() {
@@ -136,6 +207,15 @@ pub fn ensure_piper(log: &mut dyn FnMut(&str)) -> anyhow::Result<PiperPaths> {
         return piper_self_test(&p).map(|_| p);
     }
 
+    // B. 沒有可用安裝，但 legacy 在非 ASCII 路徑且模型完整 → 本地複製遷移（不重抓 84 MB）
+    if migrate_from_legacy(&dir, log)? {
+        let p = piper_paths().ok_or_else(|| anyhow::anyhow!("遷移後仍找不到 piper"))?;
+        model_integrity(&p)?;
+        log("遷移完成，自我測試…");
+        return piper_self_test(&p).map(|_| p);
+    }
+
+    // C. 全新安裝：下載 + 驗證 + 自我測試
     std::fs::create_dir_all(&dir)?;
 
     let zip = dir.join("piper_windows_amd64.zip");
@@ -183,7 +263,7 @@ pub fn piper_self_test(p: &PiperPaths) -> anyhow::Result<()> {
         let detail = result.err().map(|e| e.to_string()).unwrap_or_else(|| "未產出 wav".to_string());
         Err(anyhow::anyhow!(
             "Piper 自我測試失敗（{detail}）。\n模型或執行檔很可能損毀 / 被防毒擋下：請刪除 {dir} 後重新執行 speakdrill init",
-            dir = crate::config::config_dir().join("piper").display()
+            dir = piper_root().display()
         ))
     }
 }
@@ -230,6 +310,49 @@ mod tests {
         assert!(err.contains("大小不符"), "錯誤訊息應指出大小不符，實際：{err}");
         println!("integrity-truncated message: {err}");
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    /// 非 ASCII 安裝路徑（中文使用者名稱）是 piper 必崩潰的環境 — 驗證偵測邏輯
+    #[test]
+    fn piper_root_ascii_detection() {
+        assert!(any_ascii("C:\\Users\\Public\\speakdrill"));
+        assert!(any_ascii("C:\\Users\\CPXru"));
+        assert!(!any_ascii("C:\\Users\\還是的\\AppData"));
+        assert!(!any_ascii("C:\\Users\\CPXru\\測試"));
+    }
+
+    #[test]
+    fn piper_paths_in_empty_dir() {
+        let d = std::env::temp_dir().join("speakdrill_empty_piper_dir");
+        let _ = std::fs::create_dir_all(&d);
+        assert!(paths_in(&d).is_none());
+    }
+
+    #[test]
+    fn any_ascii_handles_mixed() {
+        assert!(any_ascii(""));
+        assert!(any_ascii("hello world"));
+        assert!(any_ascii("123-abc_def.ghi"));
+        assert!(!any_ascii("h\u{4f60}o"));
+    }
+
+    #[test]
+    #[ignore]
+    fn migrate_copies_complete_tree() {
+        let src = std::env::temp_dir().join("speakdrill_legacy_fake");
+        let dst = std::env::temp_dir().join("speakdrill_migrate_dst");
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
+        std::fs::create_dir_all(src.join("piper").join("sub")).unwrap();
+        std::fs::write(src.join("piper").join("piper.exe"), b"fake-exe").unwrap();
+        std::fs::write(src.join("en_US-lessac-medium.onnx"), b"fake-model").unwrap();
+        std::fs::write(src.join("piper").join("sub").join("data.bin"), b"nested").unwrap();
+        copy_dir_recursive(&src, &dst).unwrap();
+        assert!(dst.join("piper").join("piper.exe").exists());
+        assert!(dst.join("en_US-lessac-medium.onnx").exists());
+        assert!(dst.join("piper").join("sub").join("data.bin").exists());
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
     }
 
     #[test]
