@@ -56,10 +56,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # 固定 shared-key：Cargo.lock 隨版本 bump 而變，預設 key 會讓每次 release 全量重編
+          # 固定 shared-key；並且不要把 Cargo.lock / Cargo.toml 的內容 hash 放進 key —
+          # 每次版本 bump 內容都變 → key 就變 → tag 發布永遠 miss（實測 "No cache found."）。
+          # 依賴檔 fingerprinting 仍由 Cargo 決定，stale cache 不影響正確性。
           shared-key: speakdrill-release
-          # 即使 build 失敗也寫入快取，讓下次重跑吃到增量編譯
           cache-on-failure: true
+          add-rust-environment-hash-key: false
 
       - name: Build (CLI + GUI)
         run: cargo build --release -p speakdrill-cli -p speakdrill-gui

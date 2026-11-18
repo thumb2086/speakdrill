@@ -165,6 +165,8 @@ struct App {
     sel: usize,
     logs: Vec<String>,
     running: bool,
+    /// 目前正在跑的課號（課本清單用來標出「正在跑」的那一本）
+    running_lesson: Option<String>,
     total_done: usize,
     avg_sum: f64,
     avg_n: usize,
@@ -197,6 +199,7 @@ pub fn run(rt: tokio::runtime::Runtime) -> Result<()> {
         sel: 0,
         logs: Vec::new(),
         running: false,
+        running_lesson: None,
         total_done: 0,
         avg_sum: 0.0,
         avg_n: 0,
@@ -544,6 +547,28 @@ fn start_batch(
     });
 }
 /// 課程的人類可讀標籤：單元名稱優先，id 當後括號；沒有單元名就只印 id
+/// 從 "標題（課號）"（全形括號，lesson_label 的格式）取出課號；空標題時回傳整串
+fn extract_lesson_id(s: &str) -> Option<String> {
+    match s.rfind('（') {
+        Some(open) => {
+            let id = s[open + '（'.len_utf8()..].trim_end_matches('）').trim();
+            if id.is_empty() {
+                None
+            } else {
+                Some(id.to_string())
+            }
+        }
+        None => {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        }
+    }
+}
+
 fn lesson_label(id: &str, title: &str) -> String {
     let t = title.trim();
     if t.is_empty() || t == id {
@@ -640,9 +665,15 @@ fn apply(app: &mut App, ev: Ev) {
             app.avg_sum += s.total as f64;
             app.avg_n += 1;
         }
-        Ev::LessonStart(l) => push_log(app, format!("▶ {l}")),
+        Ev::LessonStart(l) => {
+            push_log(app, format!("▶ {l}"));
+            app.running_lesson = extract_lesson_id(&l);
+        }
         Ev::LessonDone(r) => {
             app.completed.insert(r.lesson_id.clone());
+            if app.running_lesson.as_deref() == Some(r.lesson_id.as_str()) {
+                app.running_lesson = None;
+            }
             app.total_secs += r.elapsed_secs;
             push_log(app, format!(
                 "✓ {} 平均 {} （{} 句 / {} 秒）",
@@ -651,11 +682,13 @@ fn apply(app: &mut App, ev: Ev) {
         }
         Ev::BatchDone => {
             app.running = false;
+            app.running_lesson = None;
             let avg = if app.avg_n > 0 { app.avg_sum / app.avg_n as f64 } else { 0.0 };
             app.status = format!("完成：{} 句，平均 {:.1}", app.total_done, avg);
         }
         Ev::Fatal(e) => {
             app.running = false;
+            app.running_lesson = None;
             app.status = e.clone();
             push_log(app, format!("✗ {e}"));
         }
@@ -762,15 +795,36 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
             let total = lessons.len();
             let done = lessons.iter().filter(|l| app.completed.contains(&l.lesson_id)).count();
             let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u32 } else { 0 };
-            // 佇列位置（1-based）；非佇列顯示空白
+            // 佇列位置（1-based）；非佇列顯示空白；目前正在跑顯示 ▶1
             let pos = app.queue.iter().position(|&x| x == i).map(|p| p + 1);
-            let mark = pos.map(|p| format!("[{p}]")).unwrap_or_else(|| "   ".to_string());
+            let is_running = app
+                .running_lesson
+                .as_deref()
+                .map(|id| lessons.iter().any(|l| l.lesson_id == id))
+                .unwrap_or(false);
+            let mark = if is_running {
+                "▶1".to_string()
+            } else {
+                pos.map(|p| format!("[{p}]")).unwrap_or_else(|| "   ".to_string())
+            };
+            let style = if is_running {
+                // 正在跑：亮青色粗體 + ▶1
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else if done == total && total > 0 {
+                // 整本全部完成：綠色
+                Style::default().fg(Color::Green)
+            } else if pos.is_some() {
+                // 已加入佇列、待跑：黃色
+                Style::default().fg(Color::Yellow)
+            } else if done == 0 {
+                // 完全沒跑過：暗灰
+                Style::default().fg(Color::DarkGray)
+            } else {
+                // 進行中但沒入佇列：白色
+                Style::default().fg(Color::White)
+            };
             ListItem::new(TLine::from(format!("{} {}  {}  {}/{} ({:.0}%)", mark, code, name, done, total, pct)))
-                .style(if pos.is_some() {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                })
+                .style(style)
         })
         .collect();
     let list_title = if !app.queue.is_empty() {
