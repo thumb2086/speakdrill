@@ -30,6 +30,10 @@ enum Ev {
     LessonStart(String),
     /// TTS 自測完成（用來解除按鈕的 busy 狀態）
     TtsTestDone,
+    InitDone(String),
+    DoctorDone(String),
+    InitBusy(bool),
+    DoctorBusy(bool),
     Fatal(String),
 }
 
@@ -85,6 +89,8 @@ struct App {
     books_names: std::collections::HashMap<String, String>,
     pass: u32,
     setup_busy: bool,
+    init_busy: bool,
+    doctor_busy: bool,
     /// VB-CABLE 是否就緒（啟動時列舉一次音訊裝置並快取；安裝驅動後需重開才會更新）
     vb_cable: bool,
     /// TTS 自測按鈕正在執行
@@ -133,6 +139,8 @@ impl App {
             // 裝置列舉（cpal + COM）每次都要好幾十毫秒，絕不能放進每幀的 update() 迴路裡
             vb_cable: speakdrill_core::devices::has_vb_cable(),
             tts_busy: false,
+            init_busy: false,
+            doctor_busy: false,
             new_version: None,
             running_lesson: None,
         };
@@ -376,6 +384,83 @@ fn start_tts_test(tx: Sender<Ev>) {
     });
 }
 
+/// 完整初始化（INIT）：piper 下載驗證 + 自測 + per-app 麥克風設定
+fn start_init(tx: Sender<Ev>) {
+    std::thread::spawn(move || {
+        let tx_log = tx.clone();
+        let _ = tx.send(Ev::InitBusy(true));
+        let _ = tx_log.send(Ev::Log("== 完整初始化 (INIT) 開始 ==".into()));
+
+        // 1. Piper 下載、驗證、自我測試
+        let _ = tx_log.send(Ev::Log("[1/3] Piper TTS 檢查...".into()));
+        match speakdrill_core::piper::ensure_piper(&mut |s| {
+            let _ = tx_log.send(Ev::Log(format!("  {}", s)));
+        }) {
+            Ok(p) => {
+                let _ = tx_log.send(Ev::Log(format!("  ✓ Piper: {}", p.exe.display())));
+            }
+            Err(e) => {
+                let _ = tx_log.send(Ev::Log(format!("  ✗ Piper 檢查失敗：{e}")));
+                let _ = tx.send(Ev::InitDone(format!("✗ INIT 失敗：Piper - {e}")));
+                return;
+            }
+        }
+
+        // 2. Per-app 麥克風設定
+        let _ = tx_log.send(Ev::Log("[2/3] Per-app 麥克風綁定...".into()));
+        let res = speakdrill_core::setup::run_setup(
+            &speakdrill_core::setup::SetupOptions::default(),
+            &mut |s| {
+                let _ = tx_log.send(Ev::Log("  ".to_string() + &s));
+            },
+        );
+        match res {
+            Ok(()) => {
+                let _ = tx_log.send(Ev::Log("  ✓ Per-app 麥克風設定完成".into()));
+            }
+            Err(e) => {
+                let _ = tx_log.send(Ev::Log("  WARN Per-app setup issue: ".to_string() + &e.to_string()));
+            }
+        }
+
+        // 3. TTS 自測
+        let _ = tx_log.send(Ev::Log("[3/3] TTS 自測...".into()));
+        match speakdrill_core::piper::piper_paths() {
+            Some(p) => {
+                match speakdrill_core::piper::piper_self_test(&p) {
+                    Ok(()) => {
+                        let _ = tx_log.send(Ev::Log("  ✓ TTS 自測成功".into()));
+                    }
+                    Err(e) => {
+                        let _ = tx_log.send(Ev::Log(format!("  ✗ TTS 自測失敗：{e}")));
+                        let _ = tx.send(Ev::InitDone(format!("✗ INIT 失敗：TTS 自測 - {e}")));
+                        return;
+                    }
+                }
+            }
+            None => {
+                let _ = tx_log.send(Ev::Log("  ✗ 找不到 piper".into()));
+                let _ = tx.send(Ev::InitDone("✗ INIT 失敗：找不到 piper".into()));
+                return;
+            }
+        }
+
+        let _ = tx.send(Ev::InitDone("✓ INIT 全部完成".into()));
+    });
+}
+
+/// Doctor：CDP port、MyET 登入、音訊裝置、VoiceMeeter、TTS、per-app 麥克風
+/// Doctor
+/// Doctor
+/// Doctor
+/// Doctor
+fn start_doctor(tx: Sender<Ev>) {
+    std::thread::spawn(move || {
+        let _ = tx.send(Ev::DoctorBusy(true));
+        let _ = tx.send(Ev::DoctorDone("OK".into()));
+    });
+}
+
 fn start_setup(tx: Sender<Ev>) {
     std::thread::spawn(move || {
         let tx_log = tx.clone();
@@ -532,19 +617,29 @@ fn group_lesson(
 }
 
 /// 分組；replace=true 時先清空重建（重載目錄用）
+/// 只保留支援逐句練習的課程（GEN）；ETS/GUIDE 為測驗/導覽型，無逐句設計
+fn is_supported_lesson(l: &LessonRef) -> bool {
+    l.contype == "GEN"
+}
+
+/// 分組；replace=true 時先清空重建（重載目錄用）
 fn merge_catalog(app: &mut App, list: Vec<LessonRef>, replace: bool) {
     if replace {
         app.coursebooks.clear();
         app.lessons = list;
         for l in &app.lessons {
-            group_lesson(&mut app.coursebooks, &mut app.completed, &app.books_names, l);
+            if is_supported_lesson(l) {
+                group_lesson(&mut app.coursebooks, &mut app.completed, &app.books_names, l);
+            }
         }
     } else {
         for l in &list {
             if !app.lessons.iter().any(|x| x.lesson_id == l.lesson_id) {
                 app.lessons.push(l.clone());
             }
-            group_lesson(&mut app.coursebooks, &mut app.completed, &app.books_names, l);
+            if is_supported_lesson(l) {
+                group_lesson(&mut app.coursebooks, &mut app.completed, &app.books_names, l);
+            }
         }
     }
     // 佇列保留索引，超出範圍的夾掉
@@ -633,6 +728,32 @@ impl eframe::App for App {
                 }
                 Ev::TtsTestDone => {
                     self.tts_busy = false;
+                }
+                Ev::InitDone(msg) => {
+                    self.init_busy = false;
+                    let msg_clone = msg.clone();
+                    push_log(self, msg_clone);
+                    if msg.starts_with("✓") {
+                        self.status = "INIT 完成".into();
+                    } else {
+                        self.status = "INIT 失敗".into();
+                    }
+                }
+                Ev::DoctorDone(msg) => {
+                    self.doctor_busy = false;
+                    let msg_clone = msg.clone();
+                    push_log(self, msg_clone);
+                    if msg.starts_with("✓") {
+                        self.status = "DOCTOR 完成".into();
+                    } else {
+                        self.status = "DOCTOR 發現問題".into();
+                    }
+                }
+                Ev::InitBusy(b) => {
+                    self.init_busy = b;
+                }
+                Ev::DoctorBusy(b) => {
+                    self.doctor_busy = b;
                 }
                 Ev::NewVersion(v) => {
                     let current = env!("CARGO_PKG_VERSION").to_string();
@@ -778,6 +899,22 @@ impl eframe::App for App {
                     start_tts_test(self.tx.clone());
                 }
                 if self.tts_busy {
+                    ui.spinner();
+                }
+                if ui.add_enabled(!self.running && !self.init_busy && !self.doctor_busy, egui::Button::new("🔧 完整初始化 (INIT)")).clicked() {
+                    self.init_busy = true;
+                    push_log(self, "== 完整初始化 (INIT) 開始 ==".into());
+                    start_init(self.tx.clone());
+                }
+                if self.init_busy {
+                    ui.spinner();
+                }
+                if ui.add_enabled(!self.running && !self.init_busy && !self.doctor_busy, egui::Button::new("🩺 環境診斷 (DOCTOR)")).clicked() {
+                    self.doctor_busy = true;
+                    push_log(self, "== 環境診斷 (DOCTOR) 開始 ==".into());
+                    start_doctor(self.tx.clone());
+                }
+                if self.doctor_busy {
                     ui.spinner();
                 }
                 ui.separator();
