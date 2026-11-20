@@ -454,10 +454,80 @@ fn start_init(tx: Sender<Ev>) {
 /// Doctor
 /// Doctor
 /// Doctor
+/// 環境診斷（DOCTOR）
 fn start_doctor(tx: Sender<Ev>) {
     std::thread::spawn(move || {
+        let tx_log = tx.clone();
         let _ = tx.send(Ev::DoctorBusy(true));
-        let _ = tx.send(Ev::DoctorDone("OK".into()));
+        let _ = tx_log.send(Ev::Log("== DOCTOR Start ==".into()));
+
+        let cfg = speakdrill_core::Config::load_or_default();
+        let mut all_ok = true;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        // 1. CDP port
+        let _ = tx_log.send(Ev::Log("[1/6] CDP port check...".into()));
+        let cdp_ok = rt.block_on(async {
+            speakdrill_core::Cdp::connect("127.0.0.1", cfg.cdp_port).await.is_ok()
+        });
+        if cdp_ok { let _ = tx_log.send(Ev::Log("  OK CDP port".into())); }
+        else { let _ = tx_log.send(Ev::Log("  FAIL CDP port".into())); all_ok = false; }
+
+        // 2. MyET login
+        let _ = tx_log.send(Ev::Log("[2/6] MyET login...".into()));
+        let login_ok = rt.block_on(async {
+            speakdrill_core::ensure_logged_in(&speakdrill_core::Cdp::connect("127.0.0.1", cfg.cdp_port).await.unwrap(), &cfg.server).await.is_ok()
+        });
+        if login_ok { let _ = tx_log.send(Ev::Log("  OK MyET login".into())); }
+        else { let _ = tx_log.send(Ev::Log("  FAIL MyET login".into())); all_ok = false; }
+
+        // 3. Audio devices
+        let _ = tx_log.send(Ev::Log("[3/6] Audio devices...".into()));
+        let routes = speakdrill_core::devices::routes();
+        if routes.is_empty() { let _ = tx_log.send(Ev::Log("  FAIL no audio route".into())); all_ok = false; }
+        else { for r in routes { let _ = tx_log.send(Ev::Log(format!("  OK route: {} ({})", r.kind(), r.play_device))); } }
+
+        // 4. VB-CABLE / VoiceMeeter
+        let _ = tx_log.send(Ev::Log("[4/6] VB-CABLE/VoiceMeeter...".into()));
+        if speakdrill_core::devices::has_vb_cable() { let _ = tx_log.send(Ev::Log("  OK VB-CABLE".into())); }
+        else { let _ = tx_log.send(Ev::Log("  WARN no VB-CABLE".into())); }
+
+        if let Ok(vm) = speakdrill_core::vm::Vm::connect() {
+            let n = match vm.vm_type { 1 => 3, 2 => 5, 3 => 8, _ => 5 };
+            let mut vm_ok = false;
+            for j in 0..n {
+                if let Ok(val) = vm.get(&format!("strip[{j}].B1")) {
+                    if val > 0.5 { vm_ok = true; let _ = tx_log.send(Ev::Log("  OK VoiceMeeter strip".into())); break; }
+                }
+            }
+            if !vm_ok { let _ = tx_log.send(Ev::Log("  WARN VoiceMeeter not routed".into())); }
+        } else { let _ = tx_log.send(Ev::Log("  INFO no VoiceMeeter".into())); }
+
+        // 5. TTS
+        let _ = tx_log.send(Ev::Log("[5/6] TTS...".into()));
+        if let Some(p) = speakdrill_core::piper::piper_paths() {
+            let _ = tx_log.send(Ev::Log(format!("  OK Piper: {}", p.exe.display())).into());
+            let _ = tx_log.send(Ev::Log(format!("  OK model: {}", p.model.display())).into());
+            match speakdrill_core::piper::piper_self_test(&p) {
+                Ok(()) => { let _ = tx_log.send(Ev::Log("  OK TTS test".into())); }
+                Err(e) => { let _ = tx_log.send(Ev::Log(format!("  FAIL TTS: {e}"))); all_ok = false; }
+            }
+        } else { let _ = tx_log.send(Ev::Log("  FAIL no piper".into())); all_ok = false; }
+
+        // 6. Per-app mic
+        let _ = tx_log.send(Ev::Log("[6/6] Per-app mic...".into()));
+        let mic_ok = !cfg.play_device.is_empty();
+        if mic_ok { let _ = tx_log.send(Ev::Log("  OK config".into())); }
+        else { let _ = tx_log.send(Ev::Log("  WARN config incomplete".into())); }
+
+        // Summary
+        if all_ok {
+            let _ = tx_log.send(Ev::Log("OK DOCTOR all passed".into()));
+            let _ = tx.send(Ev::DoctorDone("OK DOCTOR all passed".into()));
+        } else {
+            let _ = tx_log.send(Ev::Log("WARN DOCTOR issues found".into()));
+            let _ = tx.send(Ev::DoctorDone("WARN DOCTOR issues found".into()));
+        }
     });
 }
 
