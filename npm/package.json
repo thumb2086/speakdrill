@@ -1,6 +1,6 @@
 {
   "name": "speakdrill",
-  "version": "0.2.60-beta.5",
+  "version": "0.2.60-beta.6",
   "description": "MyET 口說課程自動化練習：TTS 驅動、逐句跟讀演練、輸出分數報告（Windows，TUI 版；僅支援虛擬音效迴路環境）",
   "keywords": [
     "speaking",
