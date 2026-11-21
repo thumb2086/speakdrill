@@ -1,7 +1,7 @@
 {
   "name": "speakdrill",
-  "version": "0.2.60-beta.6",
-  "description": "MyET 口說課程自動化練習：TTS 驅動、逐句跟讀演練、輸出分數報告（Windows，TUI 版；僅支援虛擬音效迴路環境）",
+  "version": "0.2.60",
+  "description": "MyET \u53e3\u8aaa\u8ab2\u7a0b\u81ea\u52d5\u5316\u7df4\u7fd2\uff1aTTS \u9a45\u52d5\u3001\u9010\u53e5\u8ddf\u8b80\u6f14\u7df4\u3001\u8f38\u51fa\u5206\u6578\u5831\u544a\uff08Windows\uff0cTUI \u7248\uff1b\u50c5\u652f\u63f4\u865b\u64ec\u97f3\u6548\u8ff4\u8def\u74b0\u5883\uff09",
   "keywords": [
     "speaking",
     "shadowing",
